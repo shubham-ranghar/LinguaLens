@@ -11,7 +11,7 @@ export function defineLinguaLensManifest() {
     description:
       'Select text on any page for instant translation, pronunciation, and language learning.',
     version: '0.1.0',
-    permissions: ['storage', 'activeTab', 'scripting'] as const,
+    permissions: ['storage', 'activeTab', 'scripting'],
     host_permissions: ['https://*/*', 'http://*/*'],
     action: {
       default_title: 'LinguaLens',

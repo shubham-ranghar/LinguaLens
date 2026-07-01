@@ -13,6 +13,7 @@ import {
   SUPPORTED_LANGUAGES,
   getLanguageLabel,
   getPageLanguage,
+  normalizeLanguageCode,
   speakText,
 } from '@/lib/utils';
 import type { TranslationResult, UserSettings } from '@/types';
@@ -137,6 +138,18 @@ export function SelectionPopup({
   const [savedToVocab, setSavedToVocab] = useState(false);
   const selectedTextRef = useRef(selectedText);
 
+  // Only block when both dropdowns explicitly pick the same language.
+  // "Auto-detect" must not be resolved to page language here — that caused
+  // false positives (e.g. Auto-detect → English on an English page).
+  const normalizedSourceLang = normalizeLanguageCode(sourceLang);
+  const normalizedTargetLang = normalizeLanguageCode(targetLang);
+  const isSameLanguage =
+    sourceLang !== 'auto' && normalizedSourceLang === normalizedTargetLang;
+  const showTranslateButton = settings.popupBehavior === 'click-to-show';
+  const isTranslateBusy = view.status === 'loading' || view.status === 'ai-loading';
+
+  const POPUP_MAX_HEIGHT = 480;
+
   const loadQuota = useCallback(async () => {
     try {
       const response = await fetchQuotaStatus();
@@ -175,6 +188,13 @@ export function SelectionPopup({
   }, [view]);
 
   const runTranslation = useCallback(async () => {
+    if (
+      sourceLang !== 'auto' &&
+      normalizeLanguageCode(sourceLang) === normalizeLanguageCode(targetLang)
+    ) {
+      return;
+    }
+
     const textToTranslate = selectedTextRef.current;
     setView({ status: 'loading' });
     try {
@@ -345,22 +365,32 @@ export function SelectionPopup({
   }, []);
 
   useEffect(() => {
-    if (settings.popupBehavior === 'auto-show') {
-      void runTranslation();
+    if (settings.popupBehavior !== 'auto-show') return;
+    if (
+      sourceLang !== 'auto' &&
+      normalizeLanguageCode(sourceLang) === normalizeLanguageCode(targetLang)
+    ) {
+      return;
     }
+    void runTranslation();
   }, [settings.popupBehavior, runTranslation]);
 
   const style: React.CSSProperties = {
     position: 'fixed',
-    top: Math.min(position.top + 8, window.innerHeight - 320),
+    top: Math.min(position.top + 8, window.innerHeight - POPUP_MAX_HEIGHT - 8),
     left: Math.min(Math.max(position.left, 8), window.innerWidth - 360),
     zIndex: 2147483647,
     width: 340,
+    maxHeight: `min(${POPUP_MAX_HEIGHT}px, calc(100vh - 16px))`,
   };
 
   return (
     <ThemeWrapper theme={settings.theme}>
-      <div style={style} onClick={(e) => e.stopPropagation()} className="ll-animate-fade-in-scale">
+      <div
+        style={style}
+        onClick={(e) => e.stopPropagation()}
+        className="ll-selection-popup__shell ll-animate-fade-in-scale"
+      >
         <div className="ll-selection-popup">
           <header className="ll-selection-popup__header">
             <div className="ll-selection-popup__brand">
@@ -414,8 +444,19 @@ export function SelectionPopup({
               </Select>
             </div>
 
-            {view.status === 'idle' && settings.popupBehavior === 'click-to-show' && (
-              <Button variant="primary" className="ll-selection-popup__cta" onClick={() => void runTranslation()}>
+            {isSameLanguage && (
+              <p className="ll-banner ll-banner--warning ll-selection-popup__banner" role="status">
+                Source and target language are the same — choose a different target to translate.
+              </p>
+            )}
+
+            {showTranslateButton && (
+              <Button
+                variant="primary"
+                className="ll-selection-popup__cta"
+                disabled={isSameLanguage || isTranslateBusy}
+                onClick={() => void runTranslation()}
+              >
                 {t('translate')}
               </Button>
             )}

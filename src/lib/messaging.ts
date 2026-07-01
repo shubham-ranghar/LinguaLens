@@ -7,21 +7,32 @@ export async function sendToBackground<T extends BackgroundResponse['type']>(
   message: BackgroundRequest,
   expectedType: T,
 ): Promise<Extract<BackgroundResponse, { type: T }>> {
-  const response = (await chrome.runtime.sendMessage(message)) as BackgroundResponse | undefined;
+  try {
+    const response = (await chrome.runtime.sendMessage(message)) as BackgroundResponse | undefined;
 
-  if (!response) {
-    throw new Error('No response from background service worker.');
+    if (!response) {
+      throw new Error('No response from background service worker.');
+    }
+
+    if (response.type === 'ERROR') {
+      throw new BackgroundError(response.payload.code, response.payload.message);
+    }
+
+    if (response.type !== expectedType) {
+      throw new Error(`Unexpected response type: ${response.type}`);
+    }
+
+    return response as Extract<BackgroundResponse, { type: T }>;
+  } catch (error) {
+    // Handle service worker restart and context invalidation errors
+    if (error instanceof Error) {
+      if (error.message.includes('Receiving end does not exist') ||
+          error.message.includes('Extension context invalidated')) {
+        throw new BackgroundError('SERVICE_WORKER_RESTART', 'Extension was reloaded. Please refresh the page and try again.');
+      }
+    }
+    throw error;
   }
-
-  if (response.type === 'ERROR') {
-    throw new BackgroundError(response.payload.code, response.payload.message);
-  }
-
-  if (response.type !== expectedType) {
-    throw new Error(`Unexpected response type: ${response.type}`);
-  }
-
-  return response as Extract<BackgroundResponse, { type: T }>;
 }
 
 export class BackgroundError extends Error {

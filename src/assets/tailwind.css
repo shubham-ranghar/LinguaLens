@@ -127,6 +127,7 @@
   .ll-root--host {
     background-color: transparent;
     min-height: 0;
+    overflow: visible;
   }
 
   .dark.ll-root--host,
@@ -772,7 +773,18 @@
   }
 
   /* Selection translation popup — fully opaque surfaces */
+  .ll-selection-popup__shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
   .ll-selection-popup {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    max-height: 100%;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-xl);
     background-color: var(--color-surface);
@@ -790,6 +802,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-3);
+    flex-shrink: 0;
     min-height: 44px;
     padding: 10px 12px 10px 14px;
     border-bottom: 1px solid var(--color-border);
@@ -858,8 +871,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-3);
+    flex: 1;
+    min-height: 0;
     padding: 14px;
     background-color: var(--color-surface);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .ll-selection-popup__source {

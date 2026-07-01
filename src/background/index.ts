@@ -1,5 +1,6 @@
 import {
   defaultTranslationProvider,
+  createFallbackProvider,
   isTranslationError,
 } from '@/lib/api/translation';
 import { correctGrammar, rewrite, simplify, summarize } from '@/lib/api/ai-features';
@@ -20,41 +21,60 @@ import {
 import { resolveSourceLanguage } from '@/lib/utils';
 import type { BackgroundRequest, BackgroundResponse } from '@/types/messages';
 
-const memoryCache = new Map<string, import('@/types').TranslationResult>();
+// Debouncing cache for in-flight requests to prevent duplicate API calls
+const inFlightRequests = new Map<string, Promise<import('@/types').TranslationResult>>();
 
 async function handleTranslate(
   payload: import('@/types').TranslationRequest,
 ): Promise<BackgroundResponse> {
   const settings = await getSettings();
-  const source = resolveSourceLanguage(
-    payload.sourceLanguage ?? settings.sourceLanguage,
-    payload.pageLanguage,
-  );
+  const requestedSource = payload.sourceLanguage ?? settings.sourceLanguage;
   const target = payload.targetLanguage || settings.targetLanguage;
-  const cacheKey = buildCacheKey(payload.text, source, target);
+  const cacheSource =
+    requestedSource === 'auto'
+      ? 'auto'
+      : resolveSourceLanguage(requestedSource, payload.pageLanguage);
+  const cacheKey = buildCacheKey(payload.text, cacheSource, target);
 
-  const memHit = memoryCache.get(cacheKey);
-  if (memHit) {
-    return { type: 'TRANSLATE_RESULT', payload: { ...memHit, cached: true } };
-  }
-
+  // Check disk cache (persists across service worker restarts)
   const diskCache = await getTranslationCache();
   const diskHit = diskCache.find((c) => c.key === cacheKey);
   if (diskHit) {
-    memoryCache.set(cacheKey, diskHit.result);
     return { type: 'TRANSLATE_RESULT', payload: { ...diskHit.result, cached: true } };
   }
 
+  // Debounce: check if this request is already in-flight
+  const existingRequest = inFlightRequests.get(cacheKey);
+  if (existingRequest) {
+    const result = await existingRequest;
+    return { type: 'TRANSLATE_RESULT', payload: { ...result, cached: false } };
+  }
+
+  // Create new request promise
+  const requestPromise = (async () => {
+    try {
+      // Use fallback provider for resilience
+      const provider = createFallbackProvider();
+      const result = await provider.translate(
+        { ...payload, sourceLanguage: requestedSource, targetLanguage: target },
+        settings.myMemoryEmail || undefined,
+      );
+
+      // Cache to disk (persists across restarts)
+      await setTranslationCacheEntry({ key: cacheKey, result, timestamp: Date.now() });
+      await addQuotaWords(countWords(payload.text));
+
+      return result;
+    } finally {
+      // Clean up in-flight cache after request completes
+      inFlightRequests.delete(cacheKey);
+    }
+  })();
+
+  inFlightRequests.set(cacheKey, requestPromise);
+
   try {
-    const result = await defaultTranslationProvider.translate(
-      { ...payload, sourceLanguage: source, targetLanguage: target },
-      settings.myMemoryEmail || undefined,
-    );
-
-    memoryCache.set(cacheKey, result);
-    await setTranslationCacheEntry({ key: cacheKey, result, timestamp: Date.now() });
-    await addQuotaWords(countWords(payload.text));
-
+    const result = await requestPromise;
     return { type: 'TRANSLATE_RESULT', payload: result };
   } catch (error) {
     if (isTranslationError(error)) {

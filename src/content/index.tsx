@@ -27,6 +27,26 @@ export function initContentScript(ctx: ContentScriptContext): void {
     return response.payload;
   }
 
+  function getExtensionShadowHost(): HTMLElement | null {
+    const container = shadowUi?.uiContainer;
+    if (!container) return null;
+    const root = container.getRootNode();
+    if (root instanceof ShadowRoot) return root.host as HTMLElement;
+    return container;
+  }
+
+  /** Shadow DOM retargets event.target; composedPath() is required for hit-testing. */
+  function isEventInsideExtensionUi(event: Event): boolean {
+    const container = shadowUi?.uiContainer;
+    const host = getExtensionShadowHost();
+    if (!container && !host) return false;
+
+    const path = event.composedPath();
+    if (host && path.includes(host)) return true;
+    if (container && path.includes(container)) return true;
+    return false;
+  }
+
   function getTriggerPosition(rect: DOMRect): { top: number; left: number } {
     return {
       top: Math.max(8, rect.top - 44),
@@ -176,16 +196,14 @@ export function initContentScript(ctx: ContentScriptContext): void {
   }
 
   document.addEventListener('mouseup', (e) => {
-    // Don't close popup when clicking inside the shadow UI
-    if (shadowUi?.uiContainer?.contains(e.target as Node)) {
-      return;
-    }
+    if (isEventInsideExtensionUi(e)) return;
     if (!ignoreSelectionChange) {
       window.setTimeout(() => void handleSelectionChange(), 10);
     }
   });
 
-  document.addEventListener('keyup', () => {
+  document.addEventListener('keyup', (e) => {
+    if (isEventInsideExtensionUi(e)) return;
     if (!ignoreSelectionChange) {
       window.setTimeout(() => void handleSelectionChange(), 10);
     }
@@ -193,6 +211,9 @@ export function initContentScript(ctx: ContentScriptContext): void {
 
   document.addEventListener('selectionchange', () => {
     if (ignoreSelectionChange) return;
+    // Opening <select> and other popup controls clears page selection — don't close.
+    if (uiState.mode === 'popup') return;
+
     const text = getSelectedText();
     if (!text && uiState.mode !== 'hidden') {
       uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };

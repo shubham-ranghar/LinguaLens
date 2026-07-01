@@ -20,6 +20,9 @@ interface MyMemoryResponse {
   };
   responseStatus?: number;
   responseDetails?: string;
+  matches?: Array<{
+    source?: string;
+  }>;
 }
 
 interface DictionaryDefinition {
@@ -73,25 +76,34 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       throw translationError('INVALID_REQUEST', 'Text exceeds maximum length (5000 characters).');
     }
 
-    const source = resolveSourceLanguage(
-      request.sourceLanguage ?? 'auto',
-      request.pageLanguage,
-    );
+    const requestedSource = normalizeLanguageCode(request.sourceLanguage ?? 'auto');
     const target = normalizeLanguageCode(request.targetLanguage);
 
-    if (source === target) {
+    if (requestedSource !== 'auto' && requestedSource === target) {
       throw translationError('INVALID_REQUEST', 'Source and target language must differ.');
     }
 
-    const sourceParam = toMyMemoryLang(source);
+    const sourceParam = toMyMemoryLang(requestedSource);
     const targetParam = toMyMemoryLang(target);
 
-    const translation = await fetchMyMemoryTranslation(text, sourceParam, targetParam, myMemoryEmail);
-    const enrichment = await fetchDictionaryEnrichment(text, source, target, translation);
+    const { translatedText, detectedSource } = await fetchMyMemoryTranslation(
+      text,
+      sourceParam,
+      targetParam,
+      myMemoryEmail,
+    );
+    const resolvedSource =
+      requestedSource === 'auto'
+        ? (detectedSource ?? resolveSourceLanguage('auto', request.pageLanguage))
+        : requestedSource;
+    const enrichment =
+      requestedSource === 'auto'
+        ? null
+        : await fetchDictionaryEnrichment(text, requestedSource, target, translatedText);
 
     return {
-      translatedText: translation,
-      detectedSourceLanguage: source,
+      translatedText,
+      detectedSourceLanguage: resolvedSource,
       targetLanguage: target,
       provider: this.name,
       cached: false,
@@ -109,10 +121,12 @@ async function fetchMyMemoryTranslation(
   source: string,
   target: string,
   myMemoryEmail?: string,
-): Promise<string> {
+): Promise<{ translatedText: string; detectedSource?: string }> {
+  // MyMemory API uses "autodetect" for automatic language detection
+  const sourceParam = source === 'auto' ? 'autodetect' : source;
   const params = new URLSearchParams({
     q: text,
-    langpair: `${source}|${target}`,
+    langpair: `${sourceParam}|${target}`,
   });
 
   const email = myMemoryEmail?.trim();
@@ -155,7 +169,12 @@ async function fetchMyMemoryTranslation(
     throw translationError('API_FAILURE', 'Translation failed. Please try again.');
   }
 
-  return translatedText;
+  const detectedSource =
+    source === 'auto' && data.matches?.[0]?.source
+      ? normalizeLanguageCode(data.matches[0].source)
+      : undefined;
+
+  return { translatedText, detectedSource };
 }
 
 function getEnglishLookupWord(
@@ -292,3 +311,72 @@ export function isTranslationError(
 }
 
 export const defaultTranslationProvider: TranslationProvider = new MyMemoryTranslationProvider();
+
+/**
+ * Google Translate provider (requires API key).
+ * Note: This is a placeholder - Google Translate API requires proper authentication.
+ */
+export class GoogleTranslateProvider implements TranslationProvider {
+  readonly name = 'google';
+
+  async translate(request: TranslationRequest, _myMemoryEmail?: string): Promise<TranslationResult> {
+    // Placeholder implementation - requires Google Cloud Translation API key
+    throw translationError('MISSING_API_KEY', 'Google Translate provider requires API key configuration.');
+  }
+}
+
+/**
+ * Fallback chain provider that tries multiple providers in sequence.
+ * If the primary provider fails, it falls back to secondary providers.
+ */
+export class FallbackTranslationProvider implements TranslationProvider {
+  readonly name = 'fallback';
+  private providers: TranslationProvider[];
+
+  constructor(providers: TranslationProvider[]) {
+    if (providers.length === 0) {
+      throw new Error('Fallback provider requires at least one provider');
+    }
+    this.providers = providers;
+  }
+
+  async translate(request: TranslationRequest, myMemoryEmail?: string): Promise<TranslationResult> {
+    const errors: Error[] = [];
+
+    for (const provider of this.providers) {
+      try {
+        const result = await provider.translate(request, myMemoryEmail);
+        // Mark which provider succeeded
+        return { ...result, provider: `${provider.name} (via fallback)` };
+      } catch (error) {
+        if (isTranslationError(error)) {
+          errors.push(error);
+          // Retry with next provider on rate limit or API failure
+          if (error.code === 'RATE_LIMITED' || error.code === 'API_FAILURE') {
+            continue;
+          }
+          // Don't retry on client errors
+          throw error;
+        }
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+
+    // All providers failed
+    throw translationError(
+      'API_FAILURE',
+      `All translation providers failed: ${errors.map(e => e.message).join(', ')}`,
+    );
+  }
+}
+
+/**
+ * Create a fallback chain with MyMemory as primary and Mock as fallback.
+ * To use real providers, replace MockTranslationProvider with configured providers.
+ */
+export function createFallbackProvider(): TranslationProvider {
+  return new FallbackTranslationProvider([
+    new MyMemoryTranslationProvider(),
+    new MockTranslationProvider(), // Fallback for development/testing
+  ]);
+}
