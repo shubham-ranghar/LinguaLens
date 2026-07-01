@@ -1,0 +1,23 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["chrome"]
+  },
+  "include": [
+    "src/**/*",
+    "manifest.config.ts",
+    "wxt.config.ts",
+    ".wxt/wxt.d.ts",
+    ".wxt/types/**/*.d.ts"
+  ]
+}
