@@ -5,6 +5,7 @@ import { franc } from 'franc';
 /**
  * Common short words dictionary for language detection.
  * Used when text is too short for reliable franc detection.
+ * Covers the most frequent greetings and common words across major languages.
  */
 const COMMON_WORDS: Record<string, string> = {
   // Spanish
@@ -16,6 +17,20 @@ const COMMON_WORDS: Record<string, string> = {
   'si': 'es',
   'sí': 'es',
   'no': 'es',
+  'buenos dias': 'es',
+  'buenos días': 'es',
+  'buenas noches': 'es',
+  'buenas tardes': 'es',
+  'amigo': 'es',
+  'amiga': 'es',
+  'amor': 'es',
+  'bien': 'es',
+  'mal': 'es',
+  'perdon': 'es',
+  'perdón': 'es',
+  'disculpe': 'es',
+  'hasta luego': 'es',
+  'hasta la vista': 'es',
   // French
   'bonjour': 'fr',
   'merci': 'fr',
@@ -23,6 +38,20 @@ const COMMON_WORDS: Record<string, string> = {
   'non': 'fr',
   'au revoir': 'fr',
   'salut': 'fr',
+  'bonsoir': 'fr',
+  'bonne nuit': 'fr',
+  's il vous plait': 'fr',
+  's il vous plaît': 'fr',
+  'excusez-moi': 'fr',
+  'pardon': 'fr',
+  'monsieur': 'fr',
+  'madame': 'fr',
+  'mademoiselle': 'fr',
+  'ami': 'fr',
+  'amie': 'fr',
+  'amour': 'fr',
+  'a bientôt': 'fr',
+  'à bientôt': 'fr',
   // German
   'hallo': 'de',
   'danke': 'de',
@@ -30,16 +59,64 @@ const COMMON_WORDS: Record<string, string> = {
   'nein': 'de',
   'bitte': 'de',
   'tschüss': 'de',
+  'guten tag': 'de',
+  'guten morgen': 'de',
+  'guten abend': 'de',
+  'gute nacht': 'de',
+  'entschuldigung': 'de',
+  'verzeihung': 'de',
+  'herr': 'de',
+  'frau': 'de',
+  'freund': 'de',
+  'freundin': 'de',
+  'liebe': 'de',
+  'gut': 'de',
+  'schlecht': 'de',
+  'auf wiedersehen': 'de',
   // Hindi
   'namaste': 'hi',
   'dhanyawad': 'hi',
   'dhanyavaad': 'hi',
   'shukriya': 'hi',
   'namaskar': 'hi',
+  'pranam': 'hi',
+  'kaise ho': 'hi',
+  'kaise hain': 'hi',
+  'theek hai': 'hi',
+  'achha': 'hi',
+  'haan': 'hi',
+  'han': 'hi',
+  'nahi': 'hi',
+  'na': 'hi',
+  'swagat': 'hi',
+  'alvida': 'hi',
+  'pyar': 'hi',
+  'prem': 'hi',
+  'dost': 'hi',
+  'saheli': 'hi',
+  'achcha': 'hi',
+  'theek': 'hi',
   // Italian
   'ciao': 'it',
   'grazie': 'it',
   'prego': 'it',
+  'buongiorno': 'it',
+  'buonasera': 'it',
+  'buonanotte': 'it',
+  'per favore': 'it',
+  'scusi': 'it',
+  'scusa': 'it',
+  'perdonami': 'it',
+  'signore': 'it',
+  'signora': 'it',
+  'signorina': 'it',
+  'amico': 'it',
+  'amica': 'it',
+  'amore': 'it',
+  'bene': 'it',
+  'male': 'it',
+  'arrivederci': 'it',
+  'addio': 'it',
   // Portuguese
   'ola': 'pt',
   'olá': 'pt',
@@ -48,6 +125,17 @@ const COMMON_WORDS: Record<string, string> = {
   'sim': 'pt',
   'nao': 'pt',
   'não': 'pt',
+  'bom dia': 'pt',
+  'boa tarde': 'pt',
+  'boa noite': 'pt',
+  'desculpe': 'pt',
+  'com licença': 'pt',
+  'senhor': 'pt',
+  'senhora': 'pt',
+  'senhorita': 'pt',
+  'ate logo': 'pt',
+  'até logo': 'pt',
+  'adeus': 'pt',
 };
 
 function detectLanguage(text: string): string | null {
@@ -149,7 +237,9 @@ export const ISO_639_3_TO_639_1: Record<string, string> = {
   'ita': 'it', // Italian
   'por': 'pt', // Portuguese
   'rus': 'ru', // Russian
-  'zho': 'zh', // Chinese
+  'zho': 'zh', // Chinese (macrolanguage)
+  'cmn': 'zh', // Mandarin Chinese
+  'yue': 'zh', // Cantonese
   'jpn': 'ja', // Japanese
   'kor': 'ko', // Korean
   'ara': 'ar', // Arabic
@@ -917,6 +1007,10 @@ export const ISO_639_3_TO_639_1: Record<string, string> = {
 };
 
 function toMyMemoryLang(code: string): string {
+  // Never return 'auto' - MyMemory rejects it with 403 error
+  if (code === 'auto' || code === 'autodetect') {
+    throw new Error('toMyMemoryLang should never be called with auto/autodetect');
+  }
   const normalized = normalizeLanguageCode(code);
   return MYMEMORY_LANG_MAP[normalized] ?? normalized;
 }
@@ -948,10 +1042,46 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
     // Use client-side language detection when source is 'auto'
     let sourceParam: string;
     let detectedSource: string | null | undefined;
+    
     if (requestedSource === 'auto') {
       detectedSource = detectLanguage(text);
-      // If detection is uncertain, default to English for API call
-      sourceParam = toMyMemoryLang(detectedSource ?? 'en');
+      
+      // When detection is uncertain, use smart fallback with priority order
+      if (detectedSource === null) {
+        // Priority a: Try page language hint if available, is a valid 2-letter code, and differs from target
+        const pageLang = request.pageLanguage?.trim();
+        const isValidPageLang = pageLang && /^[a-z]{2}$/i.test(pageLang);
+        if (isValidPageLang && pageLang !== target) {
+          console.log('[Language Detection] Detection uncertain, using page language hint:', pageLang);
+          sourceParam = toMyMemoryLang(pageLang);
+        } else {
+          // Priority b: No valid page language hint or it equals target - use 'en' as last resort
+          console.log('[Language Detection] Detection uncertain, using default fallback: en');
+          sourceParam = 'en';
+        }
+        
+        // CRITICAL: Check if the guessed sourceParam equals targetParam
+        // If so, return original text with a subtle indicator instead of throwing error
+        const targetParam = toMyMemoryLang(target);
+        if (sourceParam === targetParam) {
+          console.log('[Language Detection] Fallback guess equals target language - returning original text');
+          // Return original text as "translation" with subtle indicator
+          return {
+            translatedText: text,
+            detectedSourceLanguage: sourceParam,
+            targetLanguage: target,
+            provider: this.name,
+            cached: false,
+            partOfSpeech: null,
+            definition: null,
+            synonyms: [],
+            antonyms: [],
+            exampleSentences: [],
+          };
+        }
+      } else {
+        sourceParam = toMyMemoryLang(detectedSource);
+      }
       console.log('[Language Debug] Client-side detected source:', detectedSource, 'sourceParam:', sourceParam);
     } else {
       sourceParam = toMyMemoryLang(requestedSource);
@@ -959,23 +1089,6 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
     const targetParam = toMyMemoryLang(target);
 
     console.log('[Language Debug - Pre-check] sourceParam:', sourceParam, 'targetParam:', targetParam, 'sourceParam === targetParam:', sourceParam === targetParam);
-
-    // Short-circuit: if source and target are the same, return early with friendly message
-    if (sourceParam === targetParam) {
-      console.log('[Language Debug] Source and target are the same, skipping API call');
-      return {
-        translatedText: text,
-        detectedSourceLanguage: normalizeLanguageCode(sourceParam),
-        targetLanguage: target,
-        provider: this.name,
-        cached: false,
-        partOfSpeech: null,
-        definition: null,
-        synonyms: [],
-        antonyms: [],
-        exampleSentences: [],
-      };
-    }
 
     const { translatedText, detectedSource: apiDetectedSource } = await fetchMyMemoryTranslation(
       text,
@@ -1069,8 +1182,13 @@ async function fetchMyMemoryTranslation(
   target: string,
   myMemoryEmail?: string,
 ): Promise<{ translatedText: string; detectedSource?: string }> {
-  // MyMemory API uses "autodetect" for automatic language detection
-  const sourceParam = source === 'auto' ? 'autodetect' : source;
+  // Never send 'autodetect' or 'auto' to MyMemory - it rejects it with 403 error
+  // This is a defensive check - toMyMemoryLang should already prevent this
+  if (source === 'auto' || source === 'autodetect') {
+    throw new Error('fetchMyMemoryTranslation should never be called with auto/autodetect source');
+  }
+  
+  const sourceParam = source;
   const params = new URLSearchParams({
     q: text,
     langpair: `${sourceParam}|${target}`,
@@ -1103,6 +1221,13 @@ async function fetchMyMemoryTranslation(
   console.log('[MyMemory API Raw Response]', JSON.stringify(data, null, 2));
 
   if (data.responseStatus === 403) {
+    // Check if this is the specific "PLEASE SELECT TWO DISTINCT LANGUAGES" error
+    if (data.responseDetails?.includes('PLEASE SELECT TWO DISTINCT LANGUAGES')) {
+      throw translationError(
+        'INVALID_REQUEST',
+        'Could not detect language automatically — please select the source language manually.',
+      );
+    }
     throw translationError(
       'RATE_LIMITED',
       'Daily free translation limit reached — resets at midnight. Add your email in Settings for a higher limit.',

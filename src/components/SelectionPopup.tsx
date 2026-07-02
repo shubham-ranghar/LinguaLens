@@ -541,6 +541,13 @@ export function SelectionPopup({
                     Detection works best with full sentences
                   </p>
                 )}
+                {view.result.detectedSourceLanguage && 
+                 view.result.detectedSourceLanguage === view.result.targetLanguage &&
+                 view.result.translatedText === selectedText && (
+                  <p className="ll-text-secondary text-xs mt-1">
+                    Already in {getLanguageLabel(view.result.targetLanguage)} or too short to detect
+                  </p>
+                )}
               </div>
             )}
 

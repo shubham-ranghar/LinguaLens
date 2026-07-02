@@ -1003,4 +1003,18 @@
   .ll-selection-popup__loading {
     padding: 8px 2px;
   }
+
+  .ll-selection-popup__inline-selector {
+    padding: 10px;
+    border-radius: var(--radius-md);
+    background-color: var(--color-hover);
+    border: 1px solid var(--color-border);
+  }
+
+  .ll-selection-popup__inline-selector select {
+    min-height: 34px !important;
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+    font-size: var(--text-sm) !important;
+  }
 }
