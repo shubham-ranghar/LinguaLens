@@ -7,14 +7,26 @@ import type { Theme } from '@/types';
 import '@/assets/tailwind.css';
 
 async function initOptions() {
+  console.log('[Options Main] Initializing...');
   const root = document.getElementById('root');
-  if (!root) return;
+  if (!root) {
+    console.error('[Options Main] Root element not found');
+    return;
+  }
 
-  // Apply theme before first paint to avoid flash
-  const settings = await getSettings();
-  const initialTheme = settings.theme;
-  let currentTheme: Theme = initialTheme;
-  const cleanupThemeWatcher = initTheme(root, () => currentTheme);
+  try {
+    // Apply theme before first paint to avoid flash
+    console.log('[Options Main] Loading settings...');
+    const settings = await getSettings();
+    console.log('[Options Main] Settings loaded:', settings);
+    const initialTheme = settings.theme;
+    let currentTheme: Theme = initialTheme;
+    const cleanupThemeWatcher = initTheme(root, () => currentTheme);
+  } catch (err) {
+    console.error('[Options Main] Failed to load settings:', err);
+    // Continue with default theme even if settings fail
+    const cleanupThemeWatcher = initTheme(root, () => 'system');
+  }
 
   const handleStorageChange = (
     changes: { [key: string]: chrome.storage.StorageChange },
@@ -28,11 +40,13 @@ async function initOptions() {
   };
   chrome.storage.onChanged.addListener(handleStorageChange);
 
+  console.log('[Options Main] Rendering React app...');
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <OptionsApp />
     </React.StrictMode>,
   );
+  console.log('[Options Main] React app rendered');
 
   // Cleanup on unmount
   window.addEventListener('unload', () => {

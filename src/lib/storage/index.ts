@@ -3,6 +3,7 @@ import {
   CACHE_MAX_ENTRIES,
   DEFAULT_SETTINGS,
   STORAGE_KEYS,
+  VOCABULARY_MAX_ENTRIES,
 } from './constants';
 
 function getSync<T>(key: string): Promise<T | undefined> {
@@ -138,7 +139,7 @@ export async function saveVocabularyEntry(
     id: crypto.randomUUID(),
     savedAt: Date.now(),
   };
-  const updated = [newEntry, ...vocabulary];
+  const updated = [newEntry, ...vocabulary].slice(0, VOCABULARY_MAX_ENTRIES);
   await setLocal(STORAGE_KEYS.vocabularyLocal, updated);
   return newEntry;
 }

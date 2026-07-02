@@ -11,9 +11,16 @@ export function OptionsApp() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log('[Options] Loading settings...');
     fetchSettings()
-      .then((res) => setSettings(res.payload))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load settings'));
+      .then((res) => {
+        console.log('[Options] Settings loaded:', res.payload);
+        setSettings(res.payload);
+      })
+      .catch((err) => {
+        console.error('[Options] Failed to load settings:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load settings');
+      });
   }, []);
 
   const patch = (partial: Partial<UserSettings>) => {
@@ -154,12 +161,14 @@ export function OptionsApp() {
           </p>
           <label className="ll-field-label">
             <span>Gemini API Key</span>
-            <Input
-              type="password"
-              value={settings.geminiApiKey}
+            <input
+              type="text"
+              value={settings.geminiApiKey || ''}
               onChange={(e) => patch({ geminiApiKey: e.target.value })}
               placeholder="Enter your free Gemini API key"
               autoComplete="off"
+              className="ll-field ll-focus-ring"
+              style={{ display: 'block', width: '100%', minHeight: '36px' }}
             />
             <span className="ll-text-xs ll-text-secondary">
               Your API key is stored locally on your device and never shared.
