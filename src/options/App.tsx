@@ -159,6 +159,9 @@ export function OptionsApp() {
             </a>
             .
           </p>
+          <p className="ll-text-xs ll-text-secondary">
+            Note: Google may require you to link a billing account (no charges within free limits) to activate your key's quota. If you see a "quota exceeded" error after adding your key, visit console.cloud.google.com/billing and link a billing account to the same project, then generate a new key.
+          </p>
           <label className="ll-field-label">
             <span>Gemini API Key</span>
             <input

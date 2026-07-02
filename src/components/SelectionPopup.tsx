@@ -215,6 +215,10 @@ export function SelectionPopup({
         return;
       }
 
+      console.log('[Language Debug - SelectionPopup] Setting view state with:', {
+        detectedSourceLanguage: response.payload.detectedSourceLanguage,
+        targetLanguage: response.payload.targetLanguage,
+      });
       setView({ status: 'success', result: response.payload });
       void loadQuota();
 
@@ -516,8 +520,17 @@ export function SelectionPopup({
                 <p className="ll-selection-popup__translation">{view.result.translatedText}</p>
                 <DictionaryDetails result={view.result} />
                 <p className="ll-selection-popup__meta">
-                  {getLanguageLabel(view.result.detectedSourceLanguage)} →{' '}
-                  {getLanguageLabel(view.result.targetLanguage)}
+                  {(() => {
+                    const fromLabel = getLanguageLabel(view.result.detectedSourceLanguage);
+                    const toLabel = getLanguageLabel(view.result.targetLanguage);
+                    console.log('[Language Debug - Render] Displaying label:', {
+                      fromCode: view.result.detectedSourceLanguage,
+                      fromLabel,
+                      toCode: view.result.targetLanguage,
+                      toLabel,
+                    });
+                    return `${fromLabel} → ${toLabel}`;
+                  })()}
                   {view.result.cached && ' · cached'}
                 </p>
               </div>

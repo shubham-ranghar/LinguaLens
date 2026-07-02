@@ -22,6 +22,13 @@ export async function sendToBackground<T extends BackgroundResponse['type']>(
       throw new Error(`Unexpected response type: ${response.type}`);
     }
 
+    if (expectedType === 'TRANSLATE_RESULT') {
+      console.log('[Language Debug - Messaging] Received TRANSLATE_RESULT:', {
+        detectedSourceLanguage: (response as any).payload?.detectedSourceLanguage,
+        targetLanguage: (response as any).payload?.targetLanguage,
+      });
+    }
+
     return response as Extract<BackgroundResponse, { type: T }>;
   } catch (error) {
     // Handle service worker restart and context invalidation errors

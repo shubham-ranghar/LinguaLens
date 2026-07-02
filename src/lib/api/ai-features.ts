@@ -28,11 +28,19 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
     throw new Error('MISSING_API_KEY');
   }
 
+  const maskedKey = `${apiKey.substring(0, 6)}...${apiKey.slice(-4)}`;
+  console.log('[Gemini API] Using API key:', maskedKey);
+  console.log('[Gemini API] API key length:', apiKey.length);
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
-    const response = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+    const url = `${GEMINI_ENDPOINT}?key=${apiKey}`;
+    const maskedUrl = `${GEMINI_ENDPOINT}?key=${maskedKey}`;
+    console.log('[Gemini API] Calling URL:', maskedUrl);
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -42,6 +50,16 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
     });
 
     clearTimeout(timeoutId);
+
+    console.log('[Gemini API] Response status:', response.status);
+    console.log('[Gemini API] Response ok:', response.ok);
+
+    // Log the full response body for ALL non-200 responses
+    if (!response.ok) {
+      const responseText = await response.text();
+      console.log('[Gemini API] Full response body:', responseText);
+      console.log('[Gemini API] Response status code:', response.status);
+    }
 
     if (response.status === 429) {
       throw new Error('RATE_LIMITED');
