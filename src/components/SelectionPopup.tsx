@@ -169,6 +169,7 @@ export function SelectionPopup({
 
   const handleSaveToVocabulary = useCallback(async () => {
     if (view.status !== 'success') return;
+    if (!view.result.detectedSourceLanguage) return; // Skip saving if detection uncertain
     
     try {
       await saveVocabulary({
@@ -228,7 +229,7 @@ export function SelectionPopup({
           payload: {
             originalText: textToTranslate,
             translatedText: response.payload.translatedText,
-            sourceLanguage: response.payload.detectedSourceLanguage,
+            sourceLanguage: response.payload.detectedSourceLanguage ?? 'auto',
             targetLanguage: response.payload.targetLanguage,
             url: window.location.href,
           },
@@ -521,7 +522,9 @@ export function SelectionPopup({
                 <DictionaryDetails result={view.result} />
                 <p className="ll-selection-popup__meta">
                   {(() => {
-                    const fromLabel = getLanguageLabel(view.result.detectedSourceLanguage);
+                    const fromLabel = view.result.detectedSourceLanguage
+                      ? getLanguageLabel(view.result.detectedSourceLanguage)
+                      : 'Auto-detected';
                     const toLabel = getLanguageLabel(view.result.targetLanguage);
                     console.log('[Language Debug - Render] Displaying label:', {
                       fromCode: view.result.detectedSourceLanguage,
@@ -533,6 +536,11 @@ export function SelectionPopup({
                   })()}
                   {view.result.cached && ' · cached'}
                 </p>
+                {!view.result.detectedSourceLanguage && (
+                  <p className="ll-text-secondary text-xs mt-1">
+                    Detection works best with full sentences
+                  </p>
+                )}
               </div>
             )}
 

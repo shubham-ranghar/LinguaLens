@@ -21,7 +21,7 @@ export interface TranslationRequest {
 
 export interface TranslationResult {
   translatedText: string;
-  detectedSourceLanguage: string;
+  detectedSourceLanguage: string | null;
   targetLanguage: string;
   provider: string;
   cached: boolean;

@@ -2,21 +2,85 @@ import type { TranslationRequest, TranslationResult } from '@/types';
 import { isSingleWord, normalizeLanguageCode, resolveSourceLanguage } from '@/lib/utils';
 import { franc } from 'franc';
 
-function detectLanguage(text: string): string {
-  if (text.length < 4) {
-    console.log('[Language Detection] Text too short, defaulting to English');
-    return 'en';
+/**
+ * Common short words dictionary for language detection.
+ * Used when text is too short for reliable franc detection.
+ */
+const COMMON_WORDS: Record<string, string> = {
+  // Spanish
+  'hola': 'es',
+  'gracias': 'es',
+  'adios': 'es',
+  'adiós': 'es',
+  'por favor': 'es',
+  'si': 'es',
+  'sí': 'es',
+  'no': 'es',
+  // French
+  'bonjour': 'fr',
+  'merci': 'fr',
+  'oui': 'fr',
+  'non': 'fr',
+  'au revoir': 'fr',
+  'salut': 'fr',
+  // German
+  'hallo': 'de',
+  'danke': 'de',
+  'ja': 'de',
+  'nein': 'de',
+  'bitte': 'de',
+  'tschüss': 'de',
+  // Hindi
+  'namaste': 'hi',
+  'dhanyawad': 'hi',
+  'dhanyavaad': 'hi',
+  'shukriya': 'hi',
+  'namaskar': 'hi',
+  // Italian
+  'ciao': 'it',
+  'grazie': 'it',
+  'prego': 'it',
+  // Portuguese
+  'ola': 'pt',
+  'olá': 'pt',
+  'obrigado': 'pt',
+  'obrigada': 'pt',
+  'sim': 'pt',
+  'nao': 'pt',
+  'não': 'pt',
+};
+
+function detectLanguage(text: string): string | null {
+  const normalizedText = text.trim().toLowerCase();
+  
+  // Check common words dictionary first for short text
+  if (normalizedText.length < 15) {
+    const commonWordMatch = COMMON_WORDS[normalizedText];
+    if (commonWordMatch) {
+      console.log('[Language Detection] Matched common word:', normalizedText, '->', commonWordMatch);
+      return commonWordMatch;
+    }
   }
+  
+  // Text too short and not in dictionary - return null (uncertain)
+  if (normalizedText.length < 4) {
+    console.log('[Language Detection] Text too short and not in dictionary, detection uncertain');
+    return null;
+  }
+  
+  // Use franc for longer text
   const detected = franc(text);
   console.log('[Language Detection] franc returned:', detected);
+  
   // Use the comprehensive ISO_639_3_TO_639_1 mapping
   const isoCode = ISO_639_3_TO_639_1[detected];
   if (isoCode) {
     console.log('[Language Detection] Mapped to ISO code:', isoCode);
     return isoCode;
   }
-  console.log('[Language Detection] Language not in mapping, defaulting to English');
-  return 'en';
+  
+  console.log('[Language Detection] Language not in mapping, detection uncertain');
+  return null;
 }
 
 const MYMEMORY_ENDPOINT = 'https://api.mymemory.translated.net/get';
@@ -883,15 +947,18 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
 
     // Use client-side language detection when source is 'auto'
     let sourceParam: string;
-    let detectedSource: string | undefined;
+    let detectedSource: string | null | undefined;
     if (requestedSource === 'auto') {
       detectedSource = detectLanguage(text);
-      sourceParam = toMyMemoryLang(detectedSource);
+      // If detection is uncertain, default to English for API call
+      sourceParam = toMyMemoryLang(detectedSource ?? 'en');
       console.log('[Language Debug] Client-side detected source:', detectedSource, 'sourceParam:', sourceParam);
     } else {
       sourceParam = toMyMemoryLang(requestedSource);
     }
     const targetParam = toMyMemoryLang(target);
+
+    console.log('[Language Debug - Pre-check] sourceParam:', sourceParam, 'targetParam:', targetParam, 'sourceParam === targetParam:', sourceParam === targetParam);
 
     // Short-circuit: if source and target are the same, return early with friendly message
     if (sourceParam === targetParam) {
@@ -917,9 +984,10 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       myMemoryEmail,
     );
     console.log('[Language Debug - API Response] apiDetectedSource:', apiDetectedSource, 'requestedSource:', requestedSource, 'target:', target);
+    console.log('[Language Debug - Translation Comparison] original:', JSON.stringify(text), 'translated:', JSON.stringify(translatedText), 'areEqual:', text.toLowerCase() === translatedText.toLowerCase());
     const resolvedSource =
       requestedSource === 'auto'
-        ? (detectedSource ?? resolveSourceLanguage('auto', request.pageLanguage))
+        ? (detectedSource ?? null)
         : requestedSource;
     console.log('[Language Debug - Resolved] resolvedSource:', resolvedSource);
 
@@ -946,6 +1014,7 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
 
     // Check if translation returned original text unchanged (indicates same-language issue)
     const isUnchanged = translatedText.toLowerCase() === text.toLowerCase();
+    console.log('[Language Debug - Unchanged Check] isUnchanged:', isUnchanged, 'requestedSource:', requestedSource);
     if (requestedSource === 'auto' && isUnchanged) {
       console.warn('[Auto-detect Warning] Translation returned original text unchanged - likely detected language matches target');
       console.log('[Language Debug] Original detectedSource from API:', detectedSource);
