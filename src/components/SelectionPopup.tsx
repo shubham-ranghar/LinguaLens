@@ -377,11 +377,11 @@ export function SelectionPopup({
 
   const style: React.CSSProperties = {
     position: 'fixed',
-    top: Math.min(position.top + 8, window.innerHeight - POPUP_MAX_HEIGHT - 8),
+    top: Math.max(8, Math.min(position.top + 8, window.innerHeight - POPUP_MAX_HEIGHT - 8)),
     left: Math.min(Math.max(position.left, 8), window.innerWidth - 360),
     zIndex: 2147483647,
     width: 340,
-    maxHeight: `min(${POPUP_MAX_HEIGHT}px, calc(100vh - 16px))`,
+    maxHeight: `min(${POPUP_MAX_HEIGHT}px, calc(100vh - 24px))`,
   };
 
   return (

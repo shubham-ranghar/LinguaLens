@@ -873,9 +873,10 @@
     gap: var(--spacing-3);
     flex: 1;
     min-height: 0;
-    padding: 14px;
+    padding: 14px 12px 14px 14px;
     background-color: var(--color-surface);
     overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
   }
 
@@ -890,10 +891,9 @@
     font-weight: 500;
     line-height: var(--leading-normal);
     color: var(--color-text);
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    flex-shrink: 0;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   }
 
   .ll-selection-popup__langs {

@@ -55,8 +55,20 @@ export function initContentScript(ctx: ContentScriptContext): void {
   }
 
   function getPopupPosition(rect: DOMRect): { top: number; left: number } {
+    const popupHeight = 320;
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
+    
+    // If there's not enough space below but enough above, position above the selection
+    let top;
+    if (spaceBelow < popupHeight && spaceAbove > popupHeight) {
+      top = Math.max(8, rect.top - popupHeight - 8);
+    } else {
+      top = Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - popupHeight - 8));
+    }
+    
     return {
-      top: Math.min(rect.bottom + 8, window.innerHeight - 320),
+      top,
       left: Math.min(Math.max(rect.left, 8), window.innerWidth - 360),
     };
   }
