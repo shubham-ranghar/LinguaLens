@@ -27,7 +27,6 @@ export function OptionsApp() {
   const patch = (partial: Partial<UserSettings>) => {
     if (!settings) return;
     setSettings({ ...settings, ...partial });
-    setSaved(false);
   };
 
   const handleSave = async () => {
@@ -37,7 +36,8 @@ export function OptionsApp() {
       const res = await updateSettings(settings);
       setSettings(res.payload);
       setSaved(true);
-      window.setTimeout(() => setSaved(false), 2000);
+      // Show saved popup briefly then close
+      window.setTimeout(() => window.close(), 1000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     }
