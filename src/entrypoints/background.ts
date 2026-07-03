@@ -18,10 +18,5 @@ export default defineBackground(() => {
     chrome.runtime.setUninstallURL('https://github.com/shubham-ranghar/LinguaLens-/issues');
   });
 
-  // Open options page when extension icon is clicked
-  chrome.action.onClicked.addListener(() => {
-    chrome.runtime.openOptionsPage();
-  });
-
   initBackground();
 });

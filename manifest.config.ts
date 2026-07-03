@@ -15,12 +15,15 @@ export function defineLinguaLensManifest() {
     host_permissions: ['https://*/*', 'http://*/*'],
     action: {
       default_title: 'LinguaLens',
+      default_popup: 'popup.html',
+      default_icon: '/icon48.png',
     },
     icons: {
       16: '/icon16.png',
       32: '/icon32.png',
       48: '/icon48.png',
       128: '/icon128.png',
+      256: '/icon256.png',
     },
     options_ui: {
       page: 'options.html',
