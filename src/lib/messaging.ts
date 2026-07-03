@@ -1,5 +1,6 @@
 import type { UserSettings, VocabularyEntry } from '@/types';
 import type { BackgroundRequest, BackgroundResponse, RewriteTone } from '@/types/messages';
+import { logger } from '@/lib/logger';
 
 export type { BackgroundRequest, BackgroundResponse, RewriteTone };
 
@@ -23,7 +24,7 @@ export async function sendToBackground<T extends BackgroundResponse['type']>(
     }
 
     if (expectedType === 'TRANSLATE_RESULT') {
-      console.log('[Language Debug - Messaging] Received TRANSLATE_RESULT:', {
+      logger.apiDebug('Received TRANSLATE_RESULT:', {
         detectedSourceLanguage: (response as any).payload?.detectedSourceLanguage,
         targetLanguage: (response as any).payload?.targetLanguage,
       });

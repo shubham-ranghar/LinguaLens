@@ -1,5 +1,4 @@
 import {
-  defaultTranslationProvider,
   createFallbackProvider,
   isTranslationError,
 } from '@/lib/api/translation';
@@ -20,6 +19,7 @@ import {
 } from '@/lib/storage';
 import { resolveSourceLanguage } from '@/lib/utils';
 import type { BackgroundRequest, BackgroundResponse } from '@/types/messages';
+import { logger } from '@/lib/logger';
 
 // Debouncing cache for in-flight requests to prevent duplicate API calls
 const inFlightRequests = new Map<string, Promise<import('@/types').TranslationResult>>();
@@ -75,7 +75,7 @@ async function handleTranslate(
 
   try {
     const result = await requestPromise;
-    console.log('[Language Debug - Background] Sending result to frontend:', {
+    logger.apiDebug('Sending result to frontend:', {
       detectedSourceLanguage: result.detectedSourceLanguage,
       targetLanguage: result.targetLanguage,
     });
@@ -164,8 +164,8 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
       const maskedKey = settings.geminiApiKey 
         ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
         : 'MISSING';
-      console.log('[DEBUG] AI_SIMPLIFY - Full settings object:', { ...settings, geminiApiKey: maskedKey });
-      console.log('[DEBUG] AI_SIMPLIFY - API key length:', settings.geminiApiKey?.length ?? 0);
+      logger.debug('AI_SIMPLIFY - Full settings object:', { ...settings, geminiApiKey: maskedKey });
+      logger.debug('AI_SIMPLIFY - API key length:', settings.geminiApiKey?.length ?? 0);
       try {
         const result = await simplify(message.payload.text, settings.geminiApiKey);
         return { type: 'AI_SIMPLIFY_RESULT', payload: result };
@@ -179,8 +179,8 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
       const maskedKey = settings.geminiApiKey 
         ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
         : 'MISSING';
-      console.log('[DEBUG] AI_CORRECT_GRAMMAR - Full settings object:', { ...settings, geminiApiKey: maskedKey });
-      console.log('[DEBUG] AI_CORRECT_GRAMMAR - API key length:', settings.geminiApiKey?.length ?? 0);
+      logger.debug('AI_CORRECT_GRAMMAR - Full settings object:', { ...settings, geminiApiKey: maskedKey });
+      logger.debug('AI_CORRECT_GRAMMAR - API key length:', settings.geminiApiKey?.length ?? 0);
       try {
         const result = await correctGrammar(message.payload.text, settings.geminiApiKey);
         return { type: 'AI_CORRECT_GRAMMAR_RESULT', payload: result };
@@ -194,8 +194,8 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
       const maskedKey = settings.geminiApiKey 
         ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
         : 'MISSING';
-      console.log('[DEBUG] AI_SUMMARIZE - Full settings object:', { ...settings, geminiApiKey: maskedKey });
-      console.log('[DEBUG] AI_SUMMARIZE - API key length:', settings.geminiApiKey?.length ?? 0);
+      logger.debug('AI_SUMMARIZE - Full settings object:', { ...settings, geminiApiKey: maskedKey });
+      logger.debug('AI_SUMMARIZE - API key length:', settings.geminiApiKey?.length ?? 0);
       try {
         const result = await summarize(message.payload.text, settings.geminiApiKey);
         return { type: 'AI_SUMMARIZE_RESULT', payload: result };
@@ -209,8 +209,8 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
       const maskedKey = settings.geminiApiKey 
         ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
         : 'MISSING';
-      console.log('[DEBUG] AI_REWRITE - Full settings object:', { ...settings, geminiApiKey: maskedKey });
-      console.log('[DEBUG] AI_REWRITE - API key length:', settings.geminiApiKey?.length ?? 0);
+      logger.debug('AI_REWRITE - Full settings object:', { ...settings, geminiApiKey: maskedKey });
+      logger.debug('AI_REWRITE - API key length:', settings.geminiApiKey?.length ?? 0);
       try {
         const result = await rewrite(message.payload.text, message.payload.tone, settings.geminiApiKey);
         return { type: 'AI_REWRITE_RESULT', payload: result };
@@ -249,7 +249,7 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
 // Usage: await clearAllStorage()
 export async function clearAllStorage(): Promise<void> {
   await chrome.storage.local.clear();
-  console.log('[DEBUG] All storage cleared successfully');
+  logger.debug('All storage cleared successfully');
 }
 
 export function initBackground(): void {

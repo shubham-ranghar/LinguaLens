@@ -3,6 +3,7 @@ import { Button, Input, Select, ThemeWrapper } from '@/components/ui';
 import { t } from '@/lib/i18n';
 import { fetchSettings, updateSettings } from '@/lib/messaging';
 import { SUPPORTED_LANGUAGES } from '@/lib/utils';
+import { logger } from '@/lib/logger';
 import type { PopupBehavior, Theme, UserSettings } from '@/types';
 
 export function OptionsApp() {
@@ -11,14 +12,14 @@ export function OptionsApp() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log('[Options] Loading settings...');
+    logger.debug('Loading settings...');
     fetchSettings()
       .then((res) => {
-        console.log('[Options] Settings loaded:', res.payload);
+        logger.debug('Settings loaded:', res.payload);
         setSettings(res.payload);
       })
       .catch((err) => {
-        console.error('[Options] Failed to load settings:', err);
+        logger.error('Failed to load settings:', err);
         setError(err instanceof Error ? err.message : 'Failed to load settings');
       });
   }, []);

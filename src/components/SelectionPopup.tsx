@@ -8,6 +8,7 @@ import {
 } from '@/components/ui';
 import { t, tQuotaWarning } from '@/lib/i18n';
 import { BackgroundError, fetchAiCorrectGrammar, fetchAiRewrite, fetchAiSimplify, fetchAiSummarize, fetchQuotaStatus, saveVocabulary, sendToBackground } from '@/lib/messaging';
+import { logger } from '@/lib/logger';
 import type { QuotaStatus } from '@/lib/quota';
 import {
   SUPPORTED_LANGUAGES,
@@ -216,7 +217,7 @@ export function SelectionPopup({
         return;
       }
 
-      console.log('[Language Debug - SelectionPopup] Setting view state with:', {
+      logger.apiDebug('Setting view state with:', {
         detectedSourceLanguage: response.payload.detectedSourceLanguage,
         targetLanguage: response.payload.targetLanguage,
       });
@@ -526,7 +527,7 @@ export function SelectionPopup({
                       ? getLanguageLabel(view.result.detectedSourceLanguage)
                       : 'Auto-detected';
                     const toLabel = getLanguageLabel(view.result.targetLanguage);
-                    console.log('[Language Debug - Render] Displaying label:', {
+                    logger.apiDebug('Displaying label:', {
                       fromCode: view.result.detectedSourceLanguage,
                       fromLabel,
                       toCode: view.result.targetLanguage,

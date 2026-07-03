@@ -1,6 +1,7 @@
 import type { TranslationRequest, TranslationResult } from '@/types';
 import { isSingleWord, normalizeLanguageCode, resolveSourceLanguage } from '@/lib/utils';
 import { franc } from 'franc';
+import { logger } from '@/lib/logger';
 
 /**
  * Common short words dictionary for language detection.
@@ -145,29 +146,29 @@ function detectLanguage(text: string): string | null {
   if (normalizedText.length < 15) {
     const commonWordMatch = COMMON_WORDS[normalizedText];
     if (commonWordMatch) {
-      console.log('[Language Detection] Matched common word:', normalizedText, '->', commonWordMatch);
+      logger.languageDetection('Matched common word:', normalizedText, '->', commonWordMatch);
       return commonWordMatch;
     }
   }
   
   // Text too short and not in dictionary - return null (uncertain)
   if (normalizedText.length < 4) {
-    console.log('[Language Detection] Text too short and not in dictionary, detection uncertain');
+    logger.languageDetection('Text too short and not in dictionary, detection uncertain');
     return null;
   }
   
   // Use franc for longer text
   const detected = franc(text);
-  console.log('[Language Detection] franc returned:', detected);
+  logger.languageDetection('franc returned:', detected);
   
   // Use the comprehensive ISO_639_3_TO_639_1 mapping
   const isoCode = ISO_639_3_TO_639_1[detected];
   if (isoCode) {
-    console.log('[Language Detection] Mapped to ISO code:', isoCode);
+    logger.languageDetection('Mapped to ISO code:', isoCode);
     return isoCode;
   }
   
-  console.log('[Language Detection] Language not in mapping, detection uncertain');
+  logger.languageDetection('Language not in mapping, detection uncertain');
   return null;
 }
 
@@ -1052,11 +1053,11 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
         const pageLang = request.pageLanguage?.trim();
         const isValidPageLang = pageLang && /^[a-z]{2}$/i.test(pageLang);
         if (isValidPageLang && pageLang !== target) {
-          console.log('[Language Detection] Detection uncertain, using page language hint:', pageLang);
+          logger.languageDetection('Detection uncertain, using page language hint:', pageLang);
           sourceParam = toMyMemoryLang(pageLang);
         } else {
           // Priority b: No valid page language hint or it equals target - use 'en' as last resort
-          console.log('[Language Detection] Detection uncertain, using default fallback: en');
+          logger.languageDetection('Detection uncertain, using default fallback: en');
           sourceParam = 'en';
         }
         
@@ -1064,7 +1065,7 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
         // If so, return original text with a subtle indicator instead of throwing error
         const targetParam = toMyMemoryLang(target);
         if (sourceParam === targetParam) {
-          console.log('[Language Detection] Fallback guess equals target language - returning original text');
+          logger.languageDetection('Fallback guess equals target language - returning original text');
           // Return original text as "translation" with subtle indicator
           return {
             translatedText: text,
@@ -1082,13 +1083,13 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       } else {
         sourceParam = toMyMemoryLang(detectedSource);
       }
-      console.log('[Language Debug] Client-side detected source:', detectedSource, 'sourceParam:', sourceParam);
+      logger.apiDebug('Client-side detected source:', detectedSource, 'sourceParam:', sourceParam);
     } else {
       sourceParam = toMyMemoryLang(requestedSource);
     }
     const targetParam = toMyMemoryLang(target);
 
-    console.log('[Language Debug - Pre-check] sourceParam:', sourceParam, 'targetParam:', targetParam, 'sourceParam === targetParam:', sourceParam === targetParam);
+    logger.apiDebug('Pre-check sourceParam:', sourceParam, 'targetParam:', targetParam, 'sourceParam === targetParam:', sourceParam === targetParam);
 
     const { translatedText, detectedSource: apiDetectedSource } = await fetchMyMemoryTranslation(
       text,
@@ -1096,17 +1097,17 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       targetParam,
       myMemoryEmail,
     );
-    console.log('[Language Debug - API Response] apiDetectedSource:', apiDetectedSource, 'requestedSource:', requestedSource, 'target:', target);
-    console.log('[Language Debug - Translation Comparison] original:', JSON.stringify(text), 'translated:', JSON.stringify(translatedText), 'areEqual:', text.toLowerCase() === translatedText.toLowerCase());
+    logger.apiDebug('API Response apiDetectedSource:', apiDetectedSource, 'requestedSource:', requestedSource, 'target:', target);
+    logger.apiDebug('Translation Comparison original:', JSON.stringify(text), 'translated:', JSON.stringify(translatedText), 'areEqual:', text.toLowerCase() === translatedText.toLowerCase());
     const resolvedSource =
       requestedSource === 'auto'
         ? (detectedSource ?? null)
         : requestedSource;
-    console.log('[Language Debug - Resolved] resolvedSource:', resolvedSource);
+    logger.apiDebug('Resolved resolvedSource:', resolvedSource);
 
     // Log detected language for debugging auto-detect issues
     if (requestedSource === 'auto') {
-      console.log('[Auto-detect Debug]', {
+      logger.apiDebug('Auto-detect', {
         rawDetected: detectedSource,
         normalizedDetected: detectedSource ? normalizeLanguageCode(detectedSource) : 'N/A',
         targetLanguage: target,
@@ -1120,24 +1121,24 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       const normalizedDetected = normalizeLanguageCode(detectedSource);
       const normalizedTarget = normalizeLanguageCode(target);
       if (normalizedDetected === normalizedTarget) {
-        console.warn('[Auto-detect Warning] Detected language matches target language - forcing translation to proceed');
+        logger.warn('Auto-detect Warning: Detected language matches target language - forcing translation to proceed');
         // Don't skip translation - let the API handle it even if detected == target
       }
     }
 
     // Check if translation returned original text unchanged (indicates same-language issue)
     const isUnchanged = translatedText.toLowerCase() === text.toLowerCase();
-    console.log('[Language Debug - Unchanged Check] isUnchanged:', isUnchanged, 'requestedSource:', requestedSource);
+    logger.apiDebug('Unchanged Check isUnchanged:', isUnchanged, 'requestedSource:', requestedSource);
     if (requestedSource === 'auto' && isUnchanged) {
-      console.warn('[Auto-detect Warning] Translation returned original text unchanged - likely detected language matches target');
-      console.log('[Language Debug] Original detectedSource from API:', detectedSource);
+      logger.warn('Auto-detect Warning: Translation returned original text unchanged - likely detected language matches target');
+      logger.apiDebug('Original detectedSource from API:', detectedSource);
       // Force a retry with explicit source language if we have a page language hint
       if (request.pageLanguage && request.pageLanguage !== target) {
-        console.log('[Auto-detect Retry] Retrying with explicit source from page language:', request.pageLanguage);
+        logger.apiDebug('Auto-detect Retry: Retrying with explicit source from page language:', request.pageLanguage);
         const retrySource = toMyMemoryLang(request.pageLanguage);
         const retryResult = await fetchMyMemoryTranslation(text, retrySource, targetParam, myMemoryEmail);
         if (retryResult.translatedText.toLowerCase() !== text.toLowerCase()) {
-          console.log('[Language Debug] Retry succeeded - using detectedSource from original API response:', detectedSource);
+          logger.apiDebug('Retry succeeded - using detectedSource from original API response:', detectedSource);
           return {
             translatedText: retryResult.translatedText,
             detectedSourceLanguage: detectedSource ?? request.pageLanguage,
@@ -1171,9 +1172,75 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       antonyms: enrichment?.antonyms ?? [],
       exampleSentences: enrichment?.exampleSentences ?? [],
     };
-    console.log('[Language Debug - Final Result] detectedSourceLanguage:', result.detectedSourceLanguage, 'targetLanguage:', result.targetLanguage);
+    logger.apiDebug('Final Result detectedSourceLanguage:', result.detectedSourceLanguage, 'targetLanguage:', result.targetLanguage);
     return result;
   }
+}
+
+/**
+ * Fetch with retry logic and exponential backoff.
+ * Retries up to 3 times on 5xx or 429 status codes.
+ * Uses exponential backoff: 1s, 2s, 4s delays.
+ * Includes 10-second timeout via AbortController.
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit = {},
+  maxRetries = 3,
+): Promise<Response> {
+  const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5MB
+  const TIMEOUT_MS = 10000; // 10 seconds
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // Check response size before processing
+      const contentLength = response.headers.get('content-length');
+      if (contentLength && parseInt(contentLength, 10) > MAX_RESPONSE_SIZE) {
+        throw new Error('Response size exceeds limit (5MB)');
+      }
+      
+      // Retry on 5xx or 429 status codes
+      if (response.status >= 500 || response.status === 429) {
+        if (attempt < maxRetries) {
+          const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+          logger.warn(`Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms delay (status: ${response.status})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+      
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      // Don't retry on abort (timeout) or network errors that won't resolve
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Request timeout after 10 seconds');
+      }
+      
+      // Retry on network errors
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000;
+        logger.warn(`Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms delay (network error)`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      throw error;
+    }
+  }
+  
+  throw new Error('Max retries exceeded');
 }
 
 async function fetchMyMemoryTranslation(
@@ -1201,7 +1268,7 @@ async function fetchMyMemoryTranslation(
 
   let response: Response;
   try {
-    response = await fetch(`${MYMEMORY_ENDPOINT}?${params.toString()}`);
+    response = await fetchWithRetry(`${MYMEMORY_ENDPOINT}?${params.toString()}`);
   } catch {
     throw translationError('API_FAILURE', 'Translation failed. Please try again.');
   }
@@ -1218,7 +1285,7 @@ async function fetchMyMemoryTranslation(
   }
 
   // DEBUG: Log full raw API response to see actual structure
-  console.log('[MyMemory API Raw Response]', JSON.stringify(data, null, 2));
+  logger.myMemoryApi('Raw Response', JSON.stringify(data, null, 2));
 
   if (data.responseStatus === 403) {
     // Check if this is the specific "PLEASE SELECT TWO DISTINCT LANGUAGES" error

@@ -3,29 +3,33 @@ import ReactDOM from 'react-dom/client';
 import { OptionsApp } from '@/options/App';
 import { getSettings } from '@/lib/storage';
 import { applyThemeToRoot, initTheme } from '@/lib/utils';
+import { logger } from '@/lib/logger';
 import type { Theme } from '@/types';
 import '@/assets/tailwind.css';
 
 async function initOptions() {
-  console.log('[Options Main] Initializing...');
+  logger.debug('Initializing...');
   const root = document.getElementById('root');
   if (!root) {
-    console.error('[Options Main] Root element not found');
+    logger.error('Root element not found');
     return;
   }
 
+  let currentTheme: Theme = 'system';
+  let cleanupThemeWatcher: (() => void) | null = null;
+
   try {
     // Apply theme before first paint to avoid flash
-    console.log('[Options Main] Loading settings...');
+    logger.debug('Loading settings...');
     const settings = await getSettings();
-    console.log('[Options Main] Settings loaded:', settings);
+    logger.debug('Settings loaded:', settings);
     const initialTheme = settings.theme;
-    let currentTheme: Theme = initialTheme;
-    const cleanupThemeWatcher = initTheme(root, () => currentTheme);
+    currentTheme = initialTheme;
+    cleanupThemeWatcher = initTheme(root, () => currentTheme);
   } catch (err) {
-    console.error('[Options Main] Failed to load settings:', err);
+    logger.error('Failed to load settings:', err);
     // Continue with default theme even if settings fail
-    const cleanupThemeWatcher = initTheme(root, () => 'system');
+    cleanupThemeWatcher = initTheme(root, () => 'system');
   }
 
   const handleStorageChange = (
@@ -40,18 +44,18 @@ async function initOptions() {
   };
   chrome.storage.onChanged.addListener(handleStorageChange);
 
-  console.log('[Options Main] Rendering React app...');
+  logger.debug('Rendering React app...');
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <OptionsApp />
     </React.StrictMode>,
   );
-  console.log('[Options Main] React app rendered');
+  logger.debug('React app rendered');
 
   // Cleanup on unmount
   window.addEventListener('unload', () => {
     chrome.storage.onChanged.removeListener(handleStorageChange);
-    cleanupThemeWatcher();
+    cleanupThemeWatcher?.();
   });
 }
 

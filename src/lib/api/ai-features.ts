@@ -1,5 +1,7 @@
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
+import { logger } from '@/lib/logger';
+
 export type RewriteTone = 'formal' | 'casual' | 'concise';
 
 interface GeminiResponse {
@@ -29,8 +31,8 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
   }
 
   const maskedKey = `${apiKey.substring(0, 6)}...${apiKey.slice(-4)}`;
-  console.log('[Gemini API] Using API key:', maskedKey);
-  console.log('[Gemini API] API key length:', apiKey.length);
+  logger.geminiApi('Using API key:', maskedKey);
+  logger.geminiApi('API key length:', apiKey.length);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -38,7 +40,7 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
   try {
     const url = `${GEMINI_ENDPOINT}?key=${apiKey}`;
     const maskedUrl = `${GEMINI_ENDPOINT}?key=${maskedKey}`;
-    console.log('[Gemini API] Calling URL:', maskedUrl);
+    logger.geminiApi('Calling URL:', maskedUrl);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -51,14 +53,14 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
 
     clearTimeout(timeoutId);
 
-    console.log('[Gemini API] Response status:', response.status);
-    console.log('[Gemini API] Response ok:', response.ok);
+    logger.geminiApi('Response status:', response.status);
+    logger.geminiApi('Response ok:', response.ok);
 
     // Log the full response body for ALL non-200 responses
     if (!response.ok) {
       const responseText = await response.text();
-      console.log('[Gemini API] Full response body:', responseText);
-      console.log('[Gemini API] Response status code:', response.status);
+      logger.geminiApi('Full response body:', responseText);
+      logger.geminiApi('Response status code:', response.status);
     }
 
     if (response.status === 429) {

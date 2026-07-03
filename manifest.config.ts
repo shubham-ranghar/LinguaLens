@@ -15,7 +15,6 @@ export function defineLinguaLensManifest() {
     host_permissions: ['https://*/*', 'http://*/*'],
     action: {
       default_title: 'LinguaLens',
-      default_popup: 'popup.html',
     },
     options_ui: {
       page: 'options.html',
@@ -29,6 +28,10 @@ export function defineLinguaLensManifest() {
         },
         description: 'Translate current text selection',
       },
+    },
+    privacy_policy_url: 'https://github.com/shubham-ranghar/LinguaLens-/blob/main/PRIVACY.md',
+    content_security_policy: {
+      extension_pages: "script-src 'self'; object-src 'self'; connect-src 'self' https://api.mymemory.translated.net https://generativelanguage.googleapis.com",
     },
   };
 }
