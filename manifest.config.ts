@@ -16,6 +16,12 @@ export function defineLinguaLensManifest() {
     action: {
       default_title: 'LinguaLens',
     },
+    icons: {
+      16: '/icon16.png',
+      32: '/icon32.png',
+      48: '/icon48.png',
+      128: '/icon128.png',
+    },
     options_ui: {
       page: 'options.html',
       open_in_tab: true,
