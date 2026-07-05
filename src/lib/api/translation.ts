@@ -1043,10 +1043,10 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
     // Use client-side language detection when source is 'auto'
     let sourceParam: string;
     let detectedSource: string | null | undefined;
-    
+
     if (requestedSource === 'auto') {
       detectedSource = detectLanguage(text);
-      
+
       // When detection is uncertain, use smart fallback with priority order
       if (detectedSource === null) {
         // Priority a: Try page language hint if available, is a valid 2-letter code, and differs from target
@@ -1056,29 +1056,10 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
           logger.languageDetection('Detection uncertain, using page language hint:', pageLang);
           sourceParam = toMyMemoryLang(pageLang);
         } else {
-          // Priority b: No valid page language hint or it equals target - use 'en' as last resort
-          logger.languageDetection('Detection uncertain, using default fallback: en');
-          sourceParam = 'en';
-        }
-        
-        // CRITICAL: Check if the guessed sourceParam equals targetParam
-        // If so, return original text with a subtle indicator instead of throwing error
-        const targetParam = toMyMemoryLang(target);
-        if (sourceParam === targetParam) {
-          logger.languageDetection('Fallback guess equals target language - returning original text');
-          // Return original text as "translation" with subtle indicator
-          return {
-            translatedText: text,
-            detectedSourceLanguage: sourceParam,
-            targetLanguage: target,
-            provider: this.name,
-            cached: false,
-            partOfSpeech: null,
-            definition: null,
-            synonyms: [],
-            antonyms: [],
-            exampleSentences: [],
-          };
+          // Priority b: No valid page language hint or it equals target - skip pre-API check
+          // Let the API handle it and rely on post-API check for same-language detection
+          logger.languageDetection('Detection uncertain, skipping pre-API same-language check');
+          sourceParam = toMyMemoryLang(pageLang || 'en'); // Use page lang or 'en' as fallback, but don't block
         }
       } else {
         sourceParam = toMyMemoryLang(detectedSource);
@@ -1088,6 +1069,45 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       sourceParam = toMyMemoryLang(requestedSource);
     }
     const targetParam = toMyMemoryLang(target);
+
+    // DEBUG: Log raw values before comparison
+    console.log('=== PRE-API SAME-LANGUAGE DEBUG ===');
+    console.log('Original text:', text);
+    console.log('Raw requestedSource:', requestedSource);
+    console.log('Raw target:', target);
+    console.log('Raw detectedSource:', detectedSource);
+    console.log('Computed sourceParam:', sourceParam);
+    console.log('Computed targetParam:', targetParam);
+    console.log('Comparison: sourceParam === targetParam:', sourceParam === targetParam);
+    console.log('Comparison expression:', `"${sourceParam}" === "${targetParam}"`);
+    console.log('Detection confident (detectedSource !== null):', requestedSource === 'auto' ? detectedSource !== null : true);
+    console.log('===================================');
+
+    // Pre-API safeguard: Skip API call if source equals target (avoids MyMemory 403 error)
+    // Only apply this check when detection is CONFIDENT (detectedSource !== null for auto-detect)
+    // When detection is uncertain, let the API handle it and rely on post-API check
+    const isDetectionConfident = requestedSource === 'auto' ? detectedSource !== null : true;
+    console.log('SKIP CHECK: sourceParam === targetParam:', sourceParam === targetParam, 'AND isDetectionConfident:', isDetectionConfident, '=> WILL SKIP:', sourceParam === targetParam && isDetectionConfident);
+    
+    if (sourceParam === targetParam && isDetectionConfident) {
+      console.log('SKIPPING API CALL - returning sameLanguage: true');
+      logger.languageDetection('Pre-API: Source equals target with confident detection - skipping API call, setting sameLanguage flag');
+      return {
+        translatedText: text,
+        detectedSourceLanguage: requestedSource === 'auto' ? detectedSource ?? sourceParam : sourceParam,
+        targetLanguage: target,
+        provider: this.name,
+        cached: false,
+        partOfSpeech: null,
+        definition: null,
+        synonyms: [],
+        antonyms: [],
+        exampleSentences: [],
+        sameLanguage: true,
+      };
+    }
+    
+    console.log('PROCEEDING TO API CALL');
 
     logger.apiDebug('Pre-check sourceParam:', sourceParam, 'targetParam:', targetParam, 'sourceParam === targetParam:', sourceParam === targetParam);
 
@@ -1116,43 +1136,35 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       });
     }
 
-    // Prevent false same-language match when auto-detect incorrectly returns target language
-    if (requestedSource === 'auto' && detectedSource) {
-      const normalizedDetected = normalizeLanguageCode(detectedSource);
-      const normalizedTarget = normalizeLanguageCode(target);
-      if (normalizedDetected === normalizedTarget) {
-        logger.warn('Auto-detect Warning: Detected language matches target language - forcing translation to proceed');
-        // Don't skip translation - let the API handle it even if detected == target
-      }
-    }
-
-    // Check if translation returned original text unchanged (indicates same-language issue)
-    const isUnchanged = translatedText.toLowerCase() === text.toLowerCase();
-    logger.apiDebug('Unchanged Check isUnchanged:', isUnchanged, 'requestedSource:', requestedSource);
-    if (requestedSource === 'auto' && isUnchanged) {
-      logger.warn('Auto-detect Warning: Translation returned original text unchanged - likely detected language matches target');
-      logger.apiDebug('Original detectedSource from API:', detectedSource);
-      // Force a retry with explicit source language if we have a page language hint
-      if (request.pageLanguage && request.pageLanguage !== target) {
-        logger.apiDebug('Auto-detect Retry: Retrying with explicit source from page language:', request.pageLanguage);
-        const retrySource = toMyMemoryLang(request.pageLanguage);
-        const retryResult = await fetchMyMemoryTranslation(text, retrySource, targetParam, myMemoryEmail);
-        if (retryResult.translatedText.toLowerCase() !== text.toLowerCase()) {
-          logger.apiDebug('Retry succeeded - using detectedSource from original API response:', detectedSource);
-          return {
-            translatedText: retryResult.translatedText,
-            detectedSourceLanguage: detectedSource ?? request.pageLanguage,
-            targetLanguage: target,
-            provider: this.name,
-            cached: false,
-            partOfSpeech: null,
-            definition: null,
-            synonyms: [],
-            antonyms: [],
-            exampleSentences: [],
-          };
-        }
-      }
+    // Post-API same-language detection: Check if translation returned original text
+    // This is more reliable than pre-API detection since it uses actual API response
+    const isUnchanged = translatedText.toLowerCase().trim() === text.toLowerCase().trim();
+    
+    // DEBUG: Log post-API comparison values
+    console.log('=== POST-API SAME-LANGUAGE DEBUG ===');
+    console.log('Original text:', text);
+    console.log('Translated text:', translatedText);
+    console.log('isUnchanged:', isUnchanged);
+    console.log('text.length:', text.length);
+    console.log('isLongEnough (>=10):', text.length >= 10);
+    console.log('requestedSource:', requestedSource);
+    console.log('target:', target);
+    console.log('isExplicitSameLanguage:', requestedSource !== 'auto' && requestedSource === target);
+    console.log('shouldSetSameLanguage:', isUnchanged && (text.length >= 10 || (requestedSource !== 'auto' && requestedSource === target)));
+    console.log('=====================================');
+    
+    logger.apiDebug('Post-API same-language check:', { isUnchanged, textLength: text.length });
+    
+    // Only set sameLanguage flag if:
+    // 1. Text is long enough to be confident (avoid false positives on short text like "ok", "hi")
+    // 2. Translation is identical to original
+    // 3. Either auto-detect was used OR explicit source matches target
+    const isLongEnough = text.length >= 10; // Minimum length threshold
+    const isExplicitSameLanguage = requestedSource !== 'auto' && requestedSource === target;
+    const shouldSetSameLanguage = isUnchanged && (isLongEnough || isExplicitSameLanguage);
+    
+    if (shouldSetSameLanguage) {
+      logger.languageDetection('Post-API: Translation returned original text - setting sameLanguage flag');
     }
 
     const enrichment =
@@ -1171,8 +1183,9 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       synonyms: enrichment?.synonyms ?? [],
       antonyms: enrichment?.antonyms ?? [],
       exampleSentences: enrichment?.exampleSentences ?? [],
+      sameLanguage: shouldSetSameLanguage,
     };
-    logger.apiDebug('Final Result detectedSourceLanguage:', result.detectedSourceLanguage, 'targetLanguage:', result.targetLanguage);
+    logger.apiDebug('Final Result detectedSourceLanguage:', result.detectedSourceLanguage, 'targetLanguage:', result.targetLanguage, 'sameLanguage:', result.sameLanguage);
     return result;
   }
 }

@@ -519,35 +519,37 @@ export function SelectionPopup({
 
             {view.status === 'success' && (
               <div className="ll-selection-popup__panel">
-                <p className="ll-selection-popup__translation">{view.result.translatedText}</p>
-                <DictionaryDetails result={view.result} />
-                <p className="ll-selection-popup__meta">
-                  {(() => {
-                    const fromLabel = view.result.detectedSourceLanguage
-                      ? getLanguageLabel(view.result.detectedSourceLanguage)
-                      : 'Auto-detected';
-                    const toLabel = getLanguageLabel(view.result.targetLanguage);
-                    logger.apiDebug('Displaying label:', {
-                      fromCode: view.result.detectedSourceLanguage,
-                      fromLabel,
-                      toCode: view.result.targetLanguage,
-                      toLabel,
-                    });
-                    return `${fromLabel} → ${toLabel}`;
-                  })()}
-                  {view.result.cached && ' · cached'}
-                </p>
-                {!view.result.detectedSourceLanguage && (
-                  <p className="ll-text-secondary text-xs mt-1">
-                    Detection works best with full sentences
-                  </p>
-                )}
-                {view.result.detectedSourceLanguage && 
-                 view.result.detectedSourceLanguage === view.result.targetLanguage &&
-                 view.result.translatedText === selectedText && (
-                  <p className="ll-text-secondary text-xs mt-1">
-                    Already in {getLanguageLabel(view.result.targetLanguage)} or too short to detect
-                  </p>
+                {view.result.sameLanguage ? (
+                  <>
+                    <div className="ll-banner ll-banner--warning ll-selection-popup__banner" role="status">
+                      Detected language is the same as your target language. Try selecting a different target language.
+                    </div>
+                    <p className="ll-selection-popup__translation">{selectedText}</p>
+                    <p className="ll-selection-popup__meta">
+                      {getLanguageLabel(view.result.detectedSourceLanguage ?? 'Unknown')}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="ll-selection-popup__translation">{view.result.translatedText}</p>
+                    <DictionaryDetails result={view.result} />
+                    <p className="ll-selection-popup__meta">
+                      {(() => {
+                        const fromLabel = view.result.detectedSourceLanguage
+                          ? getLanguageLabel(view.result.detectedSourceLanguage)
+                          : 'Auto-detected';
+                        const toLabel = getLanguageLabel(view.result.targetLanguage);
+                        logger.apiDebug('Displaying label:', {
+                          fromCode: view.result.detectedSourceLanguage,
+                          fromLabel,
+                          toCode: view.result.targetLanguage,
+                          toLabel,
+                        });
+                        return `${fromLabel} → ${toLabel}`;
+                      })()}
+                      {view.result.cached && ' · cached'}
+                    </p>
+                  </>
                 )}
               </div>
             )}

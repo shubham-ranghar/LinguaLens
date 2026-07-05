@@ -30,6 +30,7 @@ export interface TranslationResult {
   synonyms?: string[];
   antonyms?: string[];
   exampleSentences?: string[];
+  sameLanguage?: boolean;
 }
 
 export interface HistoryEntry {
