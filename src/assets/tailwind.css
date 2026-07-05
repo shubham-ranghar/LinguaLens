@@ -165,24 +165,25 @@
   .dark {
     color-scheme: dark;
 
-    --color-background: #1C1C1E;
-    --color-surface: #2C2C2E;
-    --color-surface-elevated: #232325;
-    --color-card: #232325;
+    --color-background: #0A0A0A;
+    --color-surface: #0D0D0D;
+    --color-surface-elevated: #151515;
+    --color-card: #151515;
+    --color-card-alt: #1A1A1A;
     --color-accent: #409CFF;
     --color-accent-hover: #2F8FF8;
-    --color-text: #F5F5F7;
-    --color-text-secondary: #98989D;
-    --color-text-disabled: #636366;
-    --color-border: #3A3A3C;
-    --color-divider: #3A3A3C;
+    --color-text: #FFFFFF;
+    --color-text-secondary: #D1D5DB;
+    --color-text-disabled: #9CA3AF;
+    --color-border: #2A2A2A;
+    --color-divider: #2A2A2A;
     --color-hover: rgba(255, 255, 255, 0.06);
     --color-active: rgba(255, 255, 255, 0.10);
 
     --color-error-bg: #3D1A1A;
     --color-error-text: #FF8A85;
     --color-success-bg: #1B3320;
-    --color-success-text: #81C784;
+    --color-success-text: #22C55E;
     --color-warning-bg: #332610;
     --color-warning-text: #FFB74D;
 
@@ -269,6 +270,12 @@
     border-radius: var(--radius-lg);
   }
 
+  .ll-card-alt {
+    background-color: var(--color-card-alt);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
   .ll-section {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
@@ -286,9 +293,139 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: var(--spacing-3);
-    padding-bottom: var(--spacing-3);
+    margin-bottom: var(--spacing-4);
+    padding-bottom: var(--spacing-4);
     border-bottom: 1px solid var(--color-border);
+  }
+
+  /* Modern card-based sections */
+  .ll-card-section {
+    background-color: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    padding: var(--spacing-4);
+    margin-bottom: var(--spacing-3);
+  }
+
+  .ll-card-section__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-3);
+  }
+
+  .ll-card-section__title {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .ll-card-section__subtitle {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    margin-top: 2px;
+  }
+
+  /* Status badge */
+  .ll-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    font-size: var(--text-xs);
+    font-weight: 500;
+  }
+
+  .ll-status-badge--success {
+    background-color: rgba(34, 197, 94, 0.15);
+    color: #22C55E;
+  }
+
+  .ll-status-badge__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: currentColor;
+  }
+
+  /* Modern tab control */
+  .ll-tab-control {
+    display: inline-flex;
+    background-color: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    padding: 4px;
+    gap: 4px;
+  }
+
+  .ll-tab-control__button {
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    border: none;
+    background: transparent;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .ll-tab-control__button:hover {
+    color: var(--color-text);
+  }
+
+  .ll-tab-control__button[data-active='true'] {
+    background-color: var(--color-text);
+    color: var(--color-background);
+  }
+
+  /* Progress bar */
+  .ll-progress-bar {
+    height: 4px;
+    background-color: var(--color-border);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+  }
+
+  .ll-progress-bar__fill {
+    height: 100%;
+    background-color: #22C55E;
+    border-radius: var(--radius-pill);
+    transition: width var(--transition-normal);
+  }
+
+  /* Close button */
+  .ll-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+  }
+
+  .ll-close-btn:hover {
+    background-color: var(--color-hover);
+    color: var(--color-text);
+  }
+
+  /* Primary action button - pill style */
+  .ll-btn--pill {
+    border-radius: var(--radius-pill);
+    background-color: var(--color-text);
+    color: var(--color-background);
+    border: none;
+    font-weight: 600;
+  }
+
+  .ll-btn--pill:hover:not(:disabled) {
+    background-color: var(--color-text-secondary);
   }
 
   .ll-tab-indicator {
@@ -338,6 +475,269 @@
   .ll-field:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  /* Settings-specific input field styles */
+  .ll-field--settings {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    min-height: 40px;
+  }
+
+  .dark .ll-field--settings {
+    background-color: #0D0D0D;
+  }
+
+  /* Toggle switch */
+  .ll-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    gap: 12px;
+  }
+
+  .ll-toggle__input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .ll-toggle__track {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background-color: var(--color-border);
+    border-radius: var(--radius-pill);
+    transition: background-color var(--transition-fast);
+  }
+
+  .ll-toggle__knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background-color: #FFFFFF;
+    border-radius: 50%;
+    transition: transform var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .ll-toggle__input:checked + .ll-toggle__track {
+    background-color: #22C55E;
+  }
+
+  .ll-toggle__input:checked + .ll-toggle__track .ll-toggle__knob {
+    transform: translateX(20px);
+  }
+
+  .ll-toggle__input:focus-visible + .ll-toggle__track {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* Settings page layout */
+  .ll-settings-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 32px 100px 32px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ll-settings-header {
+    margin-bottom: 24px;
+  }
+
+  .ll-settings-header__title {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 8px;
+  }
+
+  .ll-settings-header__subtitle {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+  }
+
+  .ll-settings-header__version {
+    font-size: 12px;
+    color: var(--color-text-disabled);
+    margin-top: 4px;
+  }
+
+  /* Status row */
+  .ll-settings-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 32px;
+  }
+
+  .ll-settings-status-row__text {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+  }
+
+  .ll-settings-status-row__reset {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: color var(--transition-fast);
+  }
+
+  .ll-settings-status-row__reset:hover {
+    color: var(--color-text);
+  }
+
+  .ll-settings-section {
+    background-color: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+
+  .ll-settings-section__title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 20px;
+  }
+
+  .ll-settings-section__description {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    margin-bottom: 24px;
+    line-height: 1.5;
+  }
+
+  .ll-settings-divider {
+    height: 1px;
+    background-color: var(--color-border);
+    margin: 24px 0;
+    border: none;
+  }
+
+  .ll-settings-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .ll-settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ll-settings-field__label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text);
+  }
+
+  .ll-settings-field__caption {
+    font-size: 12px;
+    color: var(--color-text-disabled);
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  .ll-settings-field__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .ll-settings-field__input-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+  }
+
+  .ll-settings-field__unit {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    margin-left: 8px;
+    white-space: nowrap;
+  }
+
+  /* Settings footer */
+  .ll-settings-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: var(--color-background);
+    border-top: 1px solid var(--color-border);
+    padding: 20px 32px;
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    z-index: 10;
+  }
+
+  .ll-settings-footer-content {
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .ll-settings-footer__status {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+  }
+
+  /* Badge/pill */
+  .ll-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    font-weight: 500;
+    background-color: var(--color-hover);
+    color: var(--color-text-secondary);
+  }
+
+  .ll-badge--success {
+    background-color: rgba(34, 197, 94, 0.15);
+    color: #22C55E;
+  }
+
+  /* Settings button styles */
+  .ll-btn--settings {
+    background-color: #6c6c6c;
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    border-radius: var(--radius-md);
+    font-weight: 500;
+  }
+
+  .ll-btn--settings:hover:not(:disabled) {
+    background-color: #6c6c6c;
+    border-color: var(--color-border);
   }
 
   .ll-field-label {

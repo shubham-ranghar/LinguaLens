@@ -2,7 +2,10 @@ import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
+const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -10,46 +13,48 @@ const publicDir = path.join(__dirname, 'public');
 
 async function resizeIcons() {
   try {
-    // Use favicon-48x48.png.png as source for all icons
-    const sourceIcon = path.join(publicDir, 'favicon-48x48.png.png');
+    // Use LL.ico as source for all icons
+    const sourceIcon = path.join(publicDir, 'LL.ico');
+    const tempPng = path.join(publicDir, 'temp_source.png');
 
-    // Resize to 16x16 as icon16.png
-    await sharp(sourceIcon)
-      .resize(16, 16, { fit: 'cover' })
-      .toFile(path.join(publicDir, 'icon16.png'));
-    console.log('✓ Created icon16.png (resized from favicon-48x48.png.png)');
+    // Convert .ico to PNG using PowerShell with a simpler approach
+    try {
+      const psScript = `Add-Type -AssemblyName System.Drawing; $img = [System.Drawing.Image]::FromFile('${sourceIcon}'); $img.Save('${tempPng}', [System.Drawing.Imaging.ImageFormat]::Png); $img.Dispose()`;
+      await execAsync(`powershell -Command "${psScript}"`);
+      console.log('✓ Converted LL.ico to PNG using PowerShell');
+    } catch (psError) {
+      console.log('PowerShell conversion failed, trying ImageMagick...');
+      try {
+        await execAsync(`magick "${sourceIcon}" "${tempPng}"`);
+        console.log('✓ Converted LL.ico to PNG using ImageMagick');
+      } catch (magickError) {
+        throw new Error('Could not convert .ico to PNG - neither PowerShell nor ImageMagick worked');
+      }
+    }
 
-    // Resize to 32x32 as icon32.png
-    await sharp(sourceIcon)
-      .resize(32, 32, { fit: 'cover' })
-      .toFile(path.join(publicDir, 'icon32.png'));
-    console.log('✓ Created icon32.png (resized from favicon-48x48.png.png)');
+    // Load the PNG file
+    const image = sharp(tempPng);
 
-    // Resize to 48x48 as icon48.png
-    await sharp(sourceIcon)
-      .resize(48, 48, { fit: 'cover' })
-      .toFile(path.join(publicDir, 'icon48.png'));
-    console.log('✓ Created icon48.png (resized from favicon-48x48.png.png)');
+    const iconSizes = [
+      { name: 'icon16.png', size: 16 },
+      { name: 'icon32.png', size: 32 },
+      { name: 'icon48.png', size: 48 },
+      { name: 'icon128.png', size: 128 },
+      { name: 'icon256.png', size: 256 },
+      { name: 'icon-toolbar.png', size: 128 },
+    ];
 
-    // Resize to 128x128 as icon128.png
-    await sharp(sourceIcon)
-      .resize(128, 128, { fit: 'cover' })
-      .toFile(path.join(publicDir, 'icon128.png'));
-    console.log('✓ Created icon128.png (resized from favicon-48x48.png.png)');
+    // Resize to each size
+    for (const { name, size } of iconSizes) {
+      const targetPath = path.join(publicDir, name);
+      await image.clone().resize(size, size, { fit: 'cover' }).toFile(targetPath);
+      console.log(`✓ Created ${name} (${size}x${size})`);
+    }
 
-    // Resize to 256x256 as icon256.png
-    await sharp(sourceIcon)
-      .resize(256, 256, { fit: 'cover' })
-      .toFile(path.join(publicDir, 'icon256.png'));
-    console.log('✓ Created icon256.png (resized from favicon-48x48.png.png)');
+    // Clean up temp file
+    fs.unlinkSync(tempPng);
 
-    // Create toolbar icon (128x128)
-    await sharp(sourceIcon)
-      .resize(128, 128, { fit: 'cover', position: 'center' })
-      .toFile(path.join(publicDir, 'icon-toolbar.png'));
-    console.log('✓ Created icon-toolbar.png (optimized for toolbar)');
-
-    console.log('\nAll icons created successfully from favicon-48x48.png.png!');
+    console.log('\nAll icons created successfully from LL.ico!');
   } catch (error) {
     console.error('Error creating icons:', error);
     process.exit(1);

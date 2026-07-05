@@ -10,6 +10,16 @@ export function OptionsApp() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [defaultSettings] = useState<UserSettings>({
+    sourceLanguage: 'auto',
+    targetLanguage: 'en',
+    popupBehavior: 'click-to-show',
+    theme: 'system',
+    myMemoryEmail: '',
+    geminiApiKey: '',
+    maxHistoryItems: 100,
+  });
 
   useEffect(() => {
     logger.debug('Loading settings...');
@@ -27,6 +37,8 @@ export function OptionsApp() {
   const patch = (partial: Partial<UserSettings>) => {
     if (!settings) return;
     setSettings({ ...settings, ...partial });
+    setHasChanges(true);
+    setSaved(false);
   };
 
   const handleSave = async () => {
@@ -36,11 +48,19 @@ export function OptionsApp() {
       const res = await updateSettings(settings);
       setSettings(res.payload);
       setSaved(true);
-      // Show saved popup briefly then close
-      window.setTimeout(() => window.close(), 1000);
+      setHasChanges(false);
+      // Show saved state briefly
+      window.setTimeout(() => setSaved(false), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     }
+  };
+
+  const handleReset = () => {
+    if (!settings) return;
+    setSettings({ ...defaultSettings });
+    setHasChanges(true);
+    setSaved(false);
   };
 
   if (!settings) {
@@ -53,101 +73,124 @@ export function OptionsApp() {
 
   return (
     <ThemeWrapper theme={settings.theme}>
-      <div className="mx-auto min-h-screen max-w-2xl px-6 py-10">
-        <h1 className="ll-text-xl mb-2 font-bold">{t('appName')} — {t('settings')}</h1>
-        <p className="ll-text-base ll-text-secondary mb-8">
-          Configure translation defaults and extension behavior. All data stays on your device.
-        </p>
+      <div className="ll-settings-page">
+        <header className="ll-settings-header">
+          <h1 className="ll-settings-header__title">{t('appName')} — {t('settings')}</h1>
+          <p className="ll-settings-header__subtitle">
+            Configure translation defaults and extension behavior. All data stays on your device.
+          </p>
+          <p className="ll-settings-header__version">Version 0.1.0</p>
+        </header>
 
-        <section className="ll-section mb-8 space-y-4">
-          <h2 className="ll-text-lg font-semibold">Languages</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Select
-              label={t('sourceLanguage')}
-              value={settings.sourceLanguage}
-              onChange={(e) => patch({ sourceLanguage: e.target.value })}
-            >
-              {SUPPORTED_LANGUAGES.map((lang) => (
-                <option key={lang.code} value={lang.code}>
-                  {lang.label}
-                </option>
-              ))}
-            </Select>
-            <Select
-              label={t('targetLanguage')}
-              value={settings.targetLanguage}
-              onChange={(e) => patch({ targetLanguage: e.target.value })}
-            >
-              {SUPPORTED_LANGUAGES.filter((l) => l.code !== 'auto').map((lang) => (
-                <option key={lang.code} value={lang.code}>
-                  {lang.label}
-                </option>
-              ))}
-            </Select>
+        <div className="ll-settings-status-row">
+          <span className="ll-settings-status-row__text">
+            {hasChanges ? 'You have unsaved changes' : 'All values match defaults'}
+          </span>
+          <button
+            type="button"
+            onClick={handleReset}
+            className="ll-settings-status-row__reset ll-focus-ring"
+          >
+            ↺ Reset to defaults
+          </button>
+        </div>
+
+        <section className="ll-settings-section">
+          <h2 className="ll-settings-section__title">Languages</h2>
+          <div className="ll-settings-field-group">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Select
+                label={t('sourceLanguage')}
+                value={settings.sourceLanguage}
+                onChange={(e) => patch({ sourceLanguage: e.target.value })}
+              >
+                {SUPPORTED_LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.label}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                label={t('targetLanguage')}
+                value={settings.targetLanguage}
+                onChange={(e) => patch({ targetLanguage: e.target.value })}
+              >
+                {SUPPORTED_LANGUAGES.filter((l) => l.code !== 'auto').map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
         </section>
 
-        <section className="ll-section mb-8 space-y-4">
-          <h2 className="ll-text-lg font-semibold">Behavior</h2>
-          <label className="ll-field-label">
-            <span>Popup behavior</span>
-            <select
-              value={settings.popupBehavior}
-              onChange={(e) => patch({ popupBehavior: e.target.value as PopupBehavior })}
-              className="ll-field ll-focus-ring"
-            >
-              <option value="click-to-show">Show floating icon — click to translate</option>
-              <option value="auto-show">Auto-translate on text selection</option>
-            </select>
-          </label>
-          <label className="ll-field-label">
-            <span>Theme</span>
-            <select
-              value={settings.theme}
-              onChange={(e) => patch({ theme: e.target.value as Theme })}
-              className="ll-field ll-focus-ring"
-            >
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
-          </label>
-          <label className="ll-field-label">
-            <span>Keyboard shortcut</span>
-            <p className="ll-text-secondary">
-              <kbd className="ll-kbd">Ctrl+Shift+L</kbd>{' '}
-              (Mac: <kbd className="ll-kbd">⌘+Shift+L</kbd>)
-              — customize in{' '}
-              <code className="ll-text-xs">chrome://extensions/shortcuts</code>
-            </p>
-          </label>
+        <section className="ll-settings-section">
+          <h2 className="ll-settings-section__title">Behavior</h2>
+          <div className="ll-settings-field-group">
+            <div className="ll-settings-field">
+              <label className="ll-settings-field__label">Popup behavior</label>
+              <select
+                value={settings.popupBehavior}
+                onChange={(e) => patch({ popupBehavior: e.target.value as PopupBehavior })}
+                className="ll-field ll-field--settings ll-focus-ring"
+              >
+                <option value="click-to-show">Show floating icon — click to translate</option>
+                <option value="auto-show">Auto-translate on text selection</option>
+              </select>
+            </div>
+            <div className="ll-settings-field">
+              <label className="ll-settings-field__label">Theme</label>
+              <select
+                value={settings.theme}
+                onChange={(e) => patch({ theme: e.target.value as Theme })}
+                className="ll-field ll-field--settings ll-focus-ring"
+              >
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </div>
+            <div className="ll-settings-field">
+              <label className="ll-settings-field__label">Keyboard shortcut</label>
+              <p className="ll-text-secondary">
+                <kbd className="ll-kbd">Ctrl+Shift+L</kbd>{' '}
+                (Mac: <kbd className="ll-kbd">⌘+Shift+L</kbd>)
+                — customize in{' '}
+                <code className="ll-text-xs">chrome://extensions/shortcuts</code>
+              </p>
+            </div>
+          </div>
         </section>
 
-        <section className="ll-section mb-8 space-y-4">
-          <h2 className="ll-text-lg font-semibold">Translation</h2>
-          <p className="ll-text-base ll-text-secondary">
+        <section className="ll-settings-section">
+          <h2 className="ll-settings-section__title">Translation</h2>
+          <p className="ll-settings-section__description">
             LinguaLens uses the free MyMemory Translation API. Selected text is sent to MyMemory
             for translation. Optional dictionary lookups use the Free Dictionary API (English only).
           </p>
-          <label className="ll-field-label">
-            <span>Email (for higher free translation quota)</span>
-            <Input
-              type="email"
-              value={settings.myMemoryEmail}
-              onChange={(e) => patch({ myMemoryEmail: e.target.value })}
-              placeholder="you@example.com (optional)"
-              autoComplete="email"
-            />
-            <span className="ll-text-xs ll-text-secondary">
-              MyMemory raises the daily free limit from ~5,000 to ~50,000 words per day when an
-              email is provided. MyMemory does not send mail — it only uses this to track quota.
-            </span>
-          </label>
+          <div className="ll-settings-field-group">
+            <div className="ll-settings-field">
+              <label className="ll-settings-field__label">Email (for higher free translation quota)</label>
+              <Input
+                type="email"
+                value={settings.myMemoryEmail}
+                onChange={(e) => patch({ myMemoryEmail: e.target.value })}
+                placeholder="you@example.com (optional)"
+                autoComplete="email"
+                className="ll-field--settings"
+              />
+              <span className="ll-settings-field__caption">
+                MyMemory raises the daily free limit from ~5,000 to ~50,000 words per day when an
+                email is provided. MyMemory does not send mail — it only uses this to track quota.
+              </span>
+            </div>
+          </div>
         </section>
 
-        <section className="ll-section mb-8 space-y-4">
-          <h2 className="ll-text-lg font-semibold">AI Features</h2>
-          <p className="ll-text-base ll-text-secondary">
+        <section className="ll-settings-section">
+          <h2 className="ll-settings-section__title">AI Features</h2>
+          <p className="ll-settings-section__description">
             AI features use Google Gemini Flash API for text simplification, grammar correction,
             summarization, and rewriting. Get a free API key from{' '}
             <a
@@ -160,29 +203,31 @@ export function OptionsApp() {
             </a>
             .
           </p>
-          <p className="ll-text-xs ll-text-secondary">
+          <p className="ll-settings-field__caption">
             Note: Google may require you to link a billing account (no charges within free limits) to activate your key's quota. If you see a "quota exceeded" error after adding your key, visit console.cloud.google.com/billing and link a billing account to the same project, then generate a new key.
           </p>
-          <label className="ll-field-label">
-            <span>Gemini API Key</span>
-            <input
-              type="text"
-              value={settings.geminiApiKey || ''}
-              onChange={(e) => patch({ geminiApiKey: e.target.value })}
-              placeholder="Enter your free Gemini API key"
-              autoComplete="off"
-              className="ll-field ll-focus-ring"
-              style={{ display: 'block', width: '100%', minHeight: '36px' }}
-            />
-            <span className="ll-text-xs ll-text-secondary">
-              Your API key is stored locally on your device and never shared.
-            </span>
-          </label>
+          <div className="ll-settings-field-group">
+            <div className="ll-settings-field">
+              <label className="ll-settings-field__label">Gemini API Key</label>
+              <input
+                type="text"
+                value={settings.geminiApiKey || ''}
+                onChange={(e) => patch({ geminiApiKey: e.target.value })}
+                placeholder="Enter your free Gemini API key"
+                autoComplete="off"
+                className="ll-field ll-field--settings ll-focus-ring"
+                style={{ display: 'block', width: '100%', minHeight: '40px' }}
+              />
+              <span className="ll-settings-field__caption">
+                Your API key is stored locally on your device and never shared.
+              </span>
+            </div>
+          </div>
         </section>
 
-        <section className="ll-section mb-8">
-          <h2 className="ll-text-lg mb-2 font-semibold">Privacy</h2>
-          <ul className="list-inside list-disc space-y-1 ll-text-base ll-text-secondary">
+        <section className="ll-settings-section">
+          <h2 className="ll-settings-section__title">Privacy</h2>
+          <ul className="list-inside list-disc space-y-2 ll-text-base ll-text-secondary">
             <li>No analytics or tracking by default.</li>
             <li>Translation history and vocabulary stay local on your device.</li>
             <li>Selected text is sent only to your configured translation/AI provider.</li>
@@ -197,11 +242,15 @@ export function OptionsApp() {
           </div>
         )}
 
-        <div className="flex items-center gap-3">
-          <Button variant="primary" onClick={() => void handleSave()}>
-            Save settings
-          </Button>
-          {saved && <span className="ll-text-base ll-text-success ll-animate-fade-in">Saved!</span>}
+        <div className="ll-settings-footer">
+          <div className="ll-settings-footer-content">
+            <span className="ll-settings-footer__status">
+              {saved ? 'All changes saved' : hasChanges ? 'Unsaved changes' : 'No changes'}
+            </span>
+            <Button variant="settings" onClick={() => void handleSave()}>
+              Save changes
+            </Button>
+          </div>
         </div>
       </div>
     </ThemeWrapper>

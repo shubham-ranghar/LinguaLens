@@ -69,6 +69,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
     shadowRoots.clear();
     
     // Hide any remaining UI
+    logger.debug('HIDE PATH: Context invalidation cleanup');
     uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
     
     logger.warn('Context invalidation cleanup complete');
@@ -348,10 +349,19 @@ export function initContentScript(ctx: ContentScriptContext): void {
   // Additional handling for SPAs like Instagram that might not trigger normal events
   document.addEventListener('mousedown', (e) => {
     if (isEventInsideExtensionUi(e)) return;
-    // Clear UI when clicking outside
+    // Clear UI when clicking outside, but with a delay to allow screenshot tools to capture
     if (uiState.mode !== 'hidden') {
-      uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
-      renderUi();
+      // Check if selection still exists after a short delay
+      // If selection is gone, user intentionally clicked elsewhere - close popup
+      // If selection still exists, likely a screenshot operation - keep popup visible
+      window.setTimeout(() => {
+        const text = getSelectedText();
+        const rect = getSelectionRect();
+        if (!text || !rect) {
+          uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
+          renderUi();
+        }
+      }, 50);
     }
   }, true);
 

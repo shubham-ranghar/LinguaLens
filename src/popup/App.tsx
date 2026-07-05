@@ -114,7 +114,7 @@ export function PopupApp({ initialTheme }: { initialTheme?: import('@/types').Th
 
   if (loading && !settings) {
     return (
-      <div className={`ll-root flex h-80 w-96 items-center justify-center p-4 ${resolveTheme('system') === 'dark' ? 'dark' : ''}`}>
+      <div className={`ll-root flex h-96 w-96 items-center justify-center p-4 ${resolveTheme('system') === 'dark' ? 'dark' : ''}`}>
         <span className="ll-text-base ll-text-secondary">Loading…</span>
       </div>
     );
@@ -124,30 +124,30 @@ export function PopupApp({ initialTheme }: { initialTheme?: import('@/types').Th
     <ThemeWrapper theme={currentTheme}>
       <div className="ll-popup-shell">
         <header className="ll-popup-shell__header">
-          <h1 className="ll-text-lg font-bold">{t('appName')}</h1>
+          <div>
+            <h1 className="ll-text-xl font-bold">{t('appName')}</h1>
+            <p className="ll-text-sm ll-text-secondary mt-1">
+              Target: {getLanguageLabel(settings?.targetLanguage ?? 'en')}
+            </p>
+          </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => chrome.runtime.openOptionsPage()}
             aria-label="Open settings"
           >
-            ⚙ {t('settings')}
+            ⚙
           </Button>
         </header>
 
-        <p className="ll-text-xs ll-text-secondary mb-3">
-          Select text on any page, then click the 🌐 button to translate.
-          Target: {getLanguageLabel(settings?.targetLanguage ?? 'en')}
-        </p>
-
         {quota?.showWarning && (
-          <div className="ll-banner ll-banner--warning ll-animate-slide-up mb-3">
+          <div className="ll-banner ll-banner--warning ll-animate-slide-up mb-4">
             <span className="mr-2" aria-hidden="true">⚠️</span>
             {tQuotaWarning(quota.wordsRemaining)}
           </div>
         )}
 
-        <div className="mb-3">
+        <div className="mb-4">
           <Input
             type="search"
             placeholder={tab === 'history' ? t('searchHistory') : 'Search vocabulary…'}
@@ -158,19 +158,19 @@ export function PopupApp({ initialTheme }: { initialTheme?: import('@/types').Th
         </div>
 
         {error && (
-          <div className="ll-banner ll-banner--error ll-animate-slide-up mb-3">
+          <div className="ll-banner ll-banner--error ll-animate-slide-up mb-4">
             <span className="mr-2" aria-hidden="true">⚠️</span>
             {error}
           </div>
         )}
 
-        <div className="mb-3 flex items-center justify-between">
-          <div className="relative flex gap-1">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="ll-tab-control">
             <button
               type="button"
               onClick={() => setTab('history')}
               data-active={tab === 'history'}
-              className="ll-tab ll-focus-ring"
+              className="ll-tab-control__button ll-focus-ring"
             >
               {t('history')}
             </button>
@@ -178,17 +178,10 @@ export function PopupApp({ initialTheme }: { initialTheme?: import('@/types').Th
               type="button"
               onClick={() => setTab('vocabulary')}
               data-active={tab === 'vocabulary'}
-              className="ll-tab ll-focus-ring"
+              className="ll-tab-control__button ll-focus-ring"
             >
               Vocabulary
             </button>
-            <div
-              className="ll-tab-indicator"
-              style={{
-                width: tab === 'history' ? '56px' : '80px',
-                left: tab === 'history' ? '10px' : '74px',
-              }}
-            />
           </div>
           {tab === 'history' && history.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => void handleClear()}>
@@ -203,73 +196,82 @@ export function PopupApp({ initialTheme }: { initialTheme?: import('@/types').Th
         </div>
 
         {reviewMode && vocabulary.length > 0 && reviewIndex < vocabulary.length ? (
-          <div className="space-y-3">
-            <div className="ll-list-item">
-              <p className="ll-text-lg font-medium">{vocabulary[reviewIndex].sourceText}</p>
-              <Button
-                variant="primary"
-                size="sm"
-                className="mt-3 w-full"
-                onClick={() => setReviewRevealed(!reviewRevealed)}
-              >
-                {reviewRevealed ? 'Hide' : 'Reveal'}
-              </Button>
-              <div className={`overflow-hidden transition-all duration-200 ease-in-out ${reviewRevealed ? 'max-h-32 opacity-100 mt-3' : 'max-h-0 opacity-0'}`}>
-                <p className="ll-text-base ll-text-secondary">
-                  {vocabulary[reviewIndex].translatedText}
-                </p>
+          <div className="ll-card-section">
+            <div className="ll-card-section__header">
+              <h3 className="ll-card-section__title">Review Mode</h3>
+              <div className="ll-status-badge ll-status-badge--success">
+                <span className="ll-status-badge__dot"></span>
+                {reviewIndex + 1}/{vocabulary.length}
               </div>
             </div>
-            <div className="flex justify-between">
-              <Button variant="ghost" size="sm" onClick={() => void handlePrevReview()} disabled={reviewIndex === 0}>
-                Previous
-              </Button>
-              <span className="ll-text-base ll-text-secondary">
-                {reviewIndex + 1} / {vocabulary.length}
-              </span>
-              <Button variant="ghost" size="sm" onClick={() => void handleNextReview()}>
-                {reviewIndex === vocabulary.length - 1 ? 'Finish' : 'Next'}
+            <div className="space-y-4">
+              <div className="ll-card-alt p-4">
+                <p className="ll-text-lg font-semibold">{vocabulary[reviewIndex].sourceText}</p>
+                <Button
+                  variant="pill"
+                  size="sm"
+                  className="mt-3 w-full"
+                  onClick={() => setReviewRevealed(!reviewRevealed)}
+                >
+                  {reviewRevealed ? 'Hide' : 'Reveal'}
+                </Button>
+                <div className={`overflow-hidden transition-all duration-200 ease-in-out ${reviewRevealed ? 'max-h-32 opacity-100 mt-3' : 'max-h-0 opacity-0'}`}>
+                  <p className="ll-text-base ll-text-secondary">
+                    {vocabulary[reviewIndex].translatedText}
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-between">
+                <Button variant="ghost" size="sm" onClick={() => void handlePrevReview()} disabled={reviewIndex === 0}>
+                  Previous
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => void handleNextReview()}>
+                  {reviewIndex === vocabulary.length - 1 ? 'Finish' : 'Next'}
+                </Button>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setReviewMode(false)} className="w-full">
+                Exit Review
               </Button>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setReviewMode(false)} className="w-full">
-              Exit Review
-            </Button>
           </div>
         ) : reviewMode ? (
-          <div className="space-y-3">
+          <div className="ll-card-section">
             <p className="ll-text-base ll-text-secondary">
               Review list changed. Exiting review mode.
             </p>
-            <Button variant="ghost" size="sm" onClick={() => setReviewMode(false)} className="w-full">
+            <Button variant="ghost" size="sm" onClick={() => setReviewMode(false)} className="w-full mt-3">
               Exit Review
             </Button>
           </div>
         ) : tab === 'history' ? (
-          <div className="max-h-56 space-y-2 overflow-y-auto">
+          <div className="max-h-72 space-y-3 overflow-y-auto">
             {history.length === 0 ? (
-              <div className="ll-empty-state ll-list-item">
+              <div className="ll-empty-state ll-card-section">
                 <div className="ll-empty-state-icon">📜</div>
                 <p className="ll-empty-state-text">{t('noHistory')}</p>
                 <p className="ll-empty-state-action">Select text on a page to start translating</p>
               </div>
             ) : (
               history.map((entry) => (
-                <article key={entry.id} className="ll-list-item ll-animate-slide-up ll-text-base">
-                  <p className="line-clamp-2 font-medium">{entry.originalText}</p>
-                  <p className="line-clamp-2 ll-text-secondary">
+                <article key={entry.id} className="ll-card-section ll-animate-slide-up">
+                  <p className="ll-text-base font-semibold mb-2">{entry.originalText}</p>
+                  <p className="ll-text-sm ll-text-secondary mb-3 line-clamp-2">
                     {entry.translatedText}
                   </p>
-                  <p className="mt-1 ll-text-xs ll-text-disabled">
-                    {getLanguageLabel(entry.sourceLanguage)} →{' '}
-                    {getLanguageLabel(entry.targetLanguage)} ·{' '}
-                    {new Date(entry.timestamp).toLocaleDateString()}
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="ll-text-xs ll-text-disabled">
+                      {getLanguageLabel(entry.sourceLanguage)} → {getLanguageLabel(entry.targetLanguage)}
+                    </p>
+                    <p className="ll-text-xs ll-text-disabled">
+                      {new Date(entry.timestamp).toLocaleDateString()}
+                    </p>
+                  </div>
                 </article>
               ))
             )}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex gap-2">
               <Input
                 type="text"
@@ -280,33 +282,33 @@ export function PopupApp({ initialTheme }: { initialTheme?: import('@/types').Th
                 className="flex-1"
               />
             </div>
-            <div className="max-h-48 space-y-2 overflow-y-auto">
+            <div className="max-h-64 space-y-3 overflow-y-auto">
               {vocabulary.length === 0 ? (
-                <div className="ll-empty-state ll-list-item">
+                <div className="ll-empty-state ll-card-section">
                   <div className="ll-empty-state-icon">📚</div>
                   <p className="ll-empty-state-text">No vocabulary saved yet</p>
                   <p className="ll-empty-state-action">Use the 📚 button when translating to save words</p>
                 </div>
               ) : (
                 vocabulary.map((entry) => (
-                  <article key={entry.id} className="ll-list-item ll-animate-slide-up ll-text-base">
-                    <div className="flex justify-between gap-2">
-                      <p className="line-clamp-1 font-medium">{entry.sourceText}</p>
+                  <article key={entry.id} className="ll-card-section ll-animate-slide-up">
+                    <div className="flex justify-between items-start gap-2 mb-2">
+                      <p className="ll-text-base font-semibold line-clamp-1">{entry.sourceText}</p>
                       <Button
-                        variant="danger"
+                        variant="ghost"
                         size="sm"
                         onClick={() => void handleDeleteVocab(entry.id)}
                         className="shrink-0"
                         aria-label={`Delete ${entry.sourceText}`}
                       >
-                        Delete
+                        ×
                       </Button>
                     </div>
-                    <p className="line-clamp-2 ll-text-secondary">
+                    <p className="ll-text-sm ll-text-secondary mb-3 line-clamp-2">
                       {entry.translatedText}
                     </p>
                     {entry.tags.length > 0 && (
-                      <p className="mt-1 ll-text-xs ll-text-disabled">
+                      <p className="ll-text-xs ll-text-disabled">
                         Tags: {entry.tags.join(', ')}
                       </p>
                     )}

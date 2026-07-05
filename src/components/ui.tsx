@@ -1,5 +1,5 @@
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'ai';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'ai' | 'pill' | 'settings';
   size?: 'sm' | 'md';
 }
 
@@ -9,6 +9,8 @@ const variantClass: Record<NonNullable<ButtonProps['variant']>, string> = {
   ghost: 'll-btn--ghost',
   danger: 'll-btn--danger',
   ai: 'll-btn--ai',
+  pill: 'll-btn--pill',
+  settings: 'll-btn--settings',
 };
 
 const sizeClass: Record<NonNullable<ButtonProps['size']>, string> = {
