@@ -22,14 +22,14 @@ export function OptionsApp() {
   });
 
   useEffect(() => {
-    logger.debug('Loading settings...');
+    logger.debug('options-app', { action: 'loading-settings' });
     fetchSettings()
       .then((res) => {
-        logger.debug('Settings loaded:', res.payload);
+        logger.debug('options-app', { action: 'settings-loaded', settings: res.payload });
         setSettings(res.payload);
       })
       .catch((err) => {
-        logger.error('Failed to load settings:', err);
+        logger.error('options-app', { action: 'settings-load-failed', error: err instanceof Error ? err.message : String(err) });
         setError(err instanceof Error ? err.message : 'Failed to load settings');
       });
   }, []);

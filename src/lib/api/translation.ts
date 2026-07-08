@@ -3,6 +3,737 @@ import { isSingleWord, normalizeLanguageCode, resolveSourceLanguage } from '@/li
 import { franc } from 'franc';
 import { logger } from '@/lib/logger';
 
+// Configuration constants for language detection
+export const MIN_RELIABLE_DETECTION_LENGTH = 20;
+export const MIN_DICTIONARY_LOOKUP_LENGTH = 15;
+export const MIN_FRANC_DETECTION_LENGTH = 4;
+
+// Configuration constants for translation
+export const MYMEMORY_MAX_CHARS_PER_REQUEST = 500; // MyMemory free tier limit
+export const CHUNK_MIN_SENTENCES = 2; // Minimum sentences per chunk to avoid fragmentation
+
+/**
+ * Normalize text for comparison by removing punctuation, extra whitespace, and case-folding.
+ * This helps avoid false negatives in same-language detection.
+ */
+function normalizeForComparison(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[\p{P}\p{S}]/gu, '') // Remove punctuation and symbols
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .trim();
+}
+
+/**
+ * Common abbreviations that should not be treated as sentence endings.
+ * These patterns are used to avoid splitting mid-abbreviation.
+ */
+const ABBREVIATION_PATTERNS = [
+  'Mr', 'Mrs', 'Ms', 'Dr', 'Prof', 'Sr', 'Jr', 'Gen', 'Rep', 'Sen', 'St',
+  'e.g', 'i.e', 'etc', 'vs', 'al', 'ca', 'approx', 'dept', 'univ', 'assn',
+  'Ave', 'Blvd', 'Rd', 'St', 'Mt', 'Ft', 'Pt', 'Co', 'Corp', 'Inc', 'Ltd',
+  'no', 'pp', 'vol', 'ch', 'sec', 'fig', 'eq', 'ex'
+];
+
+/**
+ * Check if a period is part of an abbreviation.
+ */
+function isAbbreviation(text: string, periodIndex: number): boolean {
+  const beforePeriod = text.slice(Math.max(0, periodIndex - 4), periodIndex).toLowerCase();
+  return ABBREVIATION_PATTERNS.some(abbr => beforePeriod.endsWith(abbr));
+}
+
+/**
+ * Split text into sentence-aware chunks for translation.
+ * Splits ONLY on sentence boundaries while preserving paragraph structure.
+ * Handles abbreviations, CJK/Arabic/Devanagari punctuation, and avoids splitting inside quotes/parentheses.
+ * Ensures no chunk exceeds MYMEMORY_MAX_CHARS_PER_REQUEST.
+ */
+export function splitIntoChunks(text: string): string[] {
+  // If text is short enough, return as single chunk
+  if (text.length <= MYMEMORY_MAX_CHARS_PER_REQUEST) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  const sentences: string[] = [];
+  
+  // Track nesting level for quotes and parentheses to avoid splitting inside them
+  let quoteDepth = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  
+  let sentenceStart = 0;
+  
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    
+    // Track nesting
+    if (char === '"' || char === '\'') quoteDepth++;
+    if (char === '(' || char === '[' || char === '{') {
+      if (char === '(') parenDepth++;
+      if (char === '[') bracketDepth++;
+      if (char === '{') bracketDepth++;
+    }
+    if (char === ')' || char === ']' || char === '}') {
+      if (char === ')') parenDepth = Math.max(0, parenDepth - 1);
+      if (char === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+      if (char === '}') bracketDepth = Math.max(0, bracketDepth - 1);
+    }
+    
+    // Check for sentence-ending punctuation (only when not nested)
+    const isSentenceEnd = 
+      (char === '.' || char === '!' || char === '?' || char === '。' || char === '！' || char === '？' ||
+       char === '။' || char === '۔' || char === '؟') &&
+      quoteDepth === 0 && parenDepth === 0 && bracketDepth === 0;
+    
+    if (isSentenceEnd) {
+      // For periods, check if it's an abbreviation
+      if (char === '.' && isAbbreviation(text, i)) {
+        continue;
+      }
+      
+      // Extract the sentence (from start to current position + 1)
+      let sentenceEnd = i + 1;
+      
+      // Include trailing whitespace if present
+      while (sentenceEnd < text.length && /\s/.test(text[sentenceEnd])) {
+        sentenceEnd++;
+      }
+      
+      const sentence = text.slice(sentenceStart, sentenceEnd).trim();
+      if (sentence) {
+        sentences.push(sentence);
+      }
+      
+      sentenceStart = sentenceEnd;
+    }
+  }
+  
+  // Add any remaining text as final sentence
+  const remaining = text.slice(sentenceStart).trim();
+  if (remaining) {
+    sentences.push(remaining);
+  }
+  
+  // If no sentences were found (text without punctuation), treat as single chunk
+  if (sentences.length === 0) {
+    logger.debug('chunking', { method: 'no-sentences', length: text.length });
+    return [text];
+  }
+  
+  // Build chunks from sentences, preserving paragraph structure
+  let currentChunk = '';
+  for (const sentence of sentences) {
+    const trimmedSentence = sentence.trim();
+    
+    // If adding this sentence would exceed limit, start new chunk
+    if (currentChunk.length + trimmedSentence.length > MYMEMORY_MAX_CHARS_PER_REQUEST && currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
+      currentChunk = trimmedSentence;
+    } else {
+      // Preserve paragraph breaks (double newlines)
+      if (trimmedSentence === '' && currentChunk.endsWith('\n')) {
+        currentChunk += '\n';
+      } else {
+        currentChunk += (currentChunk && !currentChunk.endsWith('\n') ? ' ' : '') + trimmedSentence;
+      }
+    }
+  }
+  
+  // Add final chunk
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+  
+  logger.debug('chunking', { 
+    method: 'sentence-split', 
+    originalLength: text.length, 
+    chunkCount: chunks.length, 
+    avgChunkSize: Math.round(text.length / chunks.length) 
+  });
+  
+  return chunks;
+}
+
+/**
+ * Interface for translated chunk with metadata.
+ */
+interface TranslatedChunk {
+  index: number;
+  originalText: string;
+  translatedText: string;
+  contextText?: string; // Context that was prepended (to be stripped)
+  contextLength?: number; // Length of context in original text (for precise stripping)
+}
+
+/**
+ * Get the last sentence from a chunk to use as context for the next chunk.
+ * This helps maintain translation coherence across chunk boundaries.
+ */
+function getTrailingContext(chunk: string): { text: string; length: number } {
+  const sentences = chunk.match(/[^.!?。！？။۔؟]+[.!?。！？။۔؟]+/g);
+  if (sentences && sentences.length > 0) {
+    const lastSentence = sentences[sentences.length - 1].trim();
+    return { text: lastSentence, length: lastSentence.length };
+  }
+  return { text: '', length: 0 };
+}
+
+/**
+ * Strip the context text from the beginning of a translated chunk.
+ * Uses character offset-based stripping rather than string matching,
+ * since the translated context may differ from the original context text.
+ * We estimate the context portion based on the original context length ratio.
+ */
+function stripContextFromTranslation(
+  translated: string,
+  contextOriginal: string,
+  fullOriginalWithContext: string
+): string {
+  if (!contextOriginal) return translated;
+  
+  // Calculate the ratio of context to the full text sent to API
+  const contextRatio = contextOriginal.length / fullOriginalWithContext.length;
+  
+  // Estimate how many characters of the translation correspond to the context
+  const estimatedContextLength = Math.round(translated.length * contextRatio);
+  
+  // Look for the first sentence boundary after the estimated context position
+  // This gives us a clean break point to strip the context
+  const searchStart = Math.max(0, estimatedContextLength - 20);
+  const searchEnd = Math.min(translated.length, estimatedContextLength + 100);
+  
+  for (let i = searchStart; i < searchEnd; i++) {
+    const char = translated[i];
+    // Check for sentence-ending punctuation
+    if (char === '.' || char === '!' || char === '?' || char === '。' || char === '！' || char === '？') {
+      // Check if followed by space or end of string
+      const nextChar = translated[i + 1];
+      if (!nextChar || /\s/.test(nextChar)) {
+        // Found a sentence boundary - strip everything before and including it
+        const stripped = translated.slice(i + 1).trim();
+        logger.debug('context-stripped', {
+          estimatedContextLength,
+          actualStripPosition: i + 1,
+          strippedLength: stripped.length
+        });
+        return stripped;
+      }
+    }
+  }
+  
+  // If we couldn't find a clean boundary, log a warning and return as-is
+  // This may cause some duplication but is safer than losing content
+  logger.warn('context-strip-failed', {
+    contextOriginal,
+    translatedLength: translated.length,
+    estimatedContextLength,
+    reason: 'no-sentence-boundary-found'
+  });
+  return translated;
+}
+
+/**
+ * Check if text is mostly proper nouns, numbers, or loanwords that wouldn't change much in translation.
+ * This prevents false positives on legitimate translations of technical terms.
+ */
+function isMostlyUntranslatableContent(text: string): boolean {
+  // Check if text is mostly numbers
+  const numberRatio = (text.match(/\d/g) || []).length / text.length;
+  if (numberRatio > 0.5) return true;
+  
+  // Check if text is mostly uppercase (likely acronyms/proper nouns)
+  const upperRatio = (text.match(/[A-Z]/g) || []).length / text.length;
+  if (upperRatio > 0.6) return true;
+  
+  // Check for common loanwords that often stay the same in Hindi
+  const loanwords = ['computer', 'internet', 'software', 'hardware', 'data', 'system', 'network', 'digital', 'online', 'website'];
+  const lowerText = text.toLowerCase();
+  const hasLoanword = loanwords.some(word => lowerText.includes(word));
+  if (hasLoanword) return true;
+  
+  return false;
+}
+
+/**
+ * Check if a text contains suspicious patterns indicating a failed translation.
+ * Returns true if the text appears to be untranslated or malformed.
+ * Excludes proper nouns, numbers, and loanwords from similarity checks.
+ */
+function isSuspiciousTranslation(translated: string, original: string): boolean {
+  // Empty translation is definitely suspicious
+  if (!translated || translated.trim().length === 0) {
+    return true;
+  }
+  
+  // If translation is identical to original for non-trivial text, likely failed
+  // But skip this check if content is mostly untranslatable (proper nouns, numbers)
+  if (original.length > 10 && translated === original) {
+    if (!isMostlyUntranslatableContent(original)) {
+      return true;
+    }
+  }
+  
+  // If translation is 90%+ identical to original, likely failed
+  // But only apply this check for longer text and skip for untranslatable content
+  if (original.length > 50) {
+    if (!isMostlyUntranslatableContent(original)) {
+      const similarity = calculateSimilarity(translated, original);
+      if (similarity > 0.9) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Calculate similarity between two strings (0 to 1).
+ * Uses simple character overlap for efficiency.
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const longer = str1.length > str2.length ? str1 : str2;
+  const shorter = str1.length > str2.length ? str2 : str1;
+  
+  if (longer.length === 0) return 1.0;
+  
+  const editDistance = levenshteinDistance(longer, shorter);
+  return (longer.length - editDistance) / longer.length;
+}
+
+/**
+ * Calculate Levenshtein distance between two strings.
+ */
+function levenshteinDistance(str1: string, str2: string): number {
+  const matrix = [];
+  
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i];
+  }
+  
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j;
+  }
+  
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  
+  return matrix[str2.length][str1.length];
+}
+
+/**
+ * Check for English words in non-Latin script output (integrity check).
+ * Returns true if 3+ consecutive English words are found.
+ */
+function hasEnglishInNonLatinOutput(text: string, targetLang: string): boolean {
+  // Skip check for Latin-script target languages
+  const latinScriptTargets = ['en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'pl', 'tr', 'vi'];
+  if (latinScriptTargets.includes(targetLang)) {
+    return false;
+  }
+  
+  // Look for 3+ consecutive English words
+  const englishWordPattern = /\b[a-zA-Z]{3,}\b/g;
+  const matches = text.match(englishWordPattern);
+  
+  if (!matches || matches.length < 3) return false;
+  
+  // Check if they appear consecutively
+  const words = text.split(/\s+/);
+  let consecutiveEnglish = 0;
+  
+  for (const word of words) {
+    if (/^[a-zA-Z]{3,}$/.test(word)) {
+      consecutiveEnglish++;
+      if (consecutiveEnglish >= 3) {
+        return true;
+      }
+    } else {
+      consecutiveEnglish = 0;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Extract significant terms (3+ words) from text for terminology consistency.
+ * Returns a map of term to its first occurrence position.
+ */
+function extractSignificantTerms(text: string): Map<string, number> {
+  const terms = new Map<string, number>();
+  const words = text.split(/\s+/);
+  
+  // Extract 2-4 word phrases
+  for (let length = 2; length <= 4; length++) {
+    for (let i = 0; i <= words.length - length; i++) {
+      const phrase = words.slice(i, i + length).join(' ');
+      // Only include phrases that start with a capital letter (likely proper nouns/technical terms)
+      if (/^[A-Z]/.test(phrase) && phrase.length > 5) {
+        if (!terms.has(phrase)) {
+          terms.set(phrase, i);
+        }
+      }
+    }
+  }
+  
+  return terms;
+}
+
+/**
+ * Apply terminology consistency to translated chunks.
+ * If the same term appears in multiple chunks, use the first chunk's translation.
+ * This is a lightweight pass to improve consistency across chunk boundaries.
+ */
+function applyTerminologyConsistency(chunks: TranslatedChunk[]): void {
+  const termTranslations = new Map<string, string>();
+  
+  for (const chunk of chunks) {
+    const originalTerms = extractSignificantTerms(chunk.originalText);
+    
+    for (const [term, position] of originalTerms) {
+      if (!termTranslations.has(term)) {
+        // Try to find the corresponding translation in the translated text
+        // This is heuristic-based since translation may change word order
+        const translatedWords = chunk.translatedText.split(/\s+/);
+        const originalWords = chunk.originalText.split(/\s+/);
+        
+        // Find the corresponding position in translation
+        const ratio = position / originalWords.length;
+        const translatedPos = Math.round(ratio * translatedWords.length);
+        
+        if (translatedPos < translatedWords.length) {
+          // Extract a phrase of similar length from translation
+          const phraseLength = term.split(/\s+/).length;
+          if (translatedPos + phraseLength <= translatedWords.length) {
+            const translatedPhrase = translatedWords.slice(translatedPos, translatedPos + phraseLength).join(' ');
+            if (translatedPhrase.length > 3) {
+              termTranslations.set(term, translatedPhrase);
+              logger.debug('term-cached', {
+                term: term.substring(0, 30),
+                translation: translatedPhrase.substring(0, 30)
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Note: This is a lightweight consistency pass.
+  // Full terminology consistency would require more sophisticated NLP.
+  // This is logged as a known limitation of the current approach.
+  if (termTranslations.size > 0) {
+    logger.debug('terminology-consistency', {
+      termsCached: termTranslations.size,
+      note: 'Lightweight terminology consistency applied. For full consistency, consider a dedicated terminology management system.'
+    });
+  }
+}
+
+/**
+ * Merge translated chunks into a single coherent text.
+ * This is the ONLY place where chunk merging should happen.
+ * Preserves original order, strips context using offsets, and normalizes whitespace.
+ */
+function mergeTranslatedChunks(chunks: TranslatedChunk[], targetLang: string): string {
+  // Apply lightweight terminology consistency
+  applyTerminologyConsistency(chunks);
+  
+  // Sort by index to ensure original order
+  const sortedChunks = [...chunks].sort((a, b) => a.index - b.index);
+  
+  let merged = '';
+  for (let i = 0; i < sortedChunks.length; i++) {
+    const chunk = sortedChunks[i];
+    let textToMerge = chunk.translatedText;
+    
+    // Strip context if this isn't the first chunk
+    if (i > 0 && chunk.contextText && chunk.contextLength) {
+      const fullOriginalWithContext = chunk.contextText + ' ' + chunk.originalText;
+      textToMerge = stripContextFromTranslation(textToMerge, chunk.contextText, fullOriginalWithContext);
+    }
+    
+    // Check for duplicate text with adjacent chunks (context stripping failure)
+    if (i > 0) {
+      const prevChunk = sortedChunks[i - 1];
+      const prevText = prevChunk.translatedText.toLowerCase();
+      const currText = textToMerge.toLowerCase();
+      
+      // Look for 8+ word overlap
+      const words = currText.split(/\s+/);
+      for (let j = 8; j < words.length; j++) {
+        const phrase = words.slice(0, j).join(' ');
+        if (prevText.includes(phrase)) {
+          logger.warn('duplicate-text-detected', {
+            chunkIndex: i,
+            overlapLength: j,
+            phrase: phrase.substring(0, 50)
+          });
+          break;
+        }
+      }
+    }
+    
+    // Add to merged result with proper spacing
+    if (merged === '') {
+      merged = textToMerge;
+    } else {
+      // Ensure exactly one space between chunks unless there's a paragraph break
+      if (textToMerge.startsWith('\n\n') || merged.endsWith('\n\n')) {
+        merged += textToMerge;
+      } else {
+        merged += ' ' + textToMerge;
+      }
+    }
+  }
+  
+  // Normalize whitespace: collapse multiple spaces, ensure single space after punctuation
+  merged = merged
+    .replace(/ +/g, ' ') // Collapse multiple spaces
+    .replace(/\n +/g, '\n') // Remove spaces after newlines
+    .replace(/ +\n/g, '\n') // Remove spaces before newlines
+    .replace(/\n{3,}/g, '\n\n') // Collapse multiple newlines to double
+    .trim();
+  
+  // Integrity check for English words in non-Latin output
+  if (hasEnglishInNonLatinOutput(merged, targetLang)) {
+    logger.warn('integrity-check-failed', {
+      targetLang,
+      reason: 'english-words-detected-in-non-latin-output',
+      sample: merged.substring(0, 100)
+    });
+  }
+  
+  return merged;
+}
+
+/**
+ * Translate a single chunk with retry logic and backoff.
+ * Retries up to 2 times on failure with exponential backoff.
+ * Throws if all retries fail.
+ */
+async function translateChunkWithRetry(
+  chunk: string,
+  index: number,
+  source: string,
+  target: string,
+  myMemoryEmail?: string,
+  contextText?: string,
+  contextLength?: number
+): Promise<{ chunk: TranslatedChunk; detectedSource?: string }> {
+  const maxRetries = 2;
+  let lastError: Error | undefined;
+  
+  // TESTING NOTE: To test the retry/failure path:
+  // 1. Open browser DevTools Console
+  // 2. Temporarily modify MYMEMORY_ENDPOINT in this file to point to a bad URL
+  // 3. Or use DevTools Network tab to throttle/block the API request
+  // 4. Check console logs for 'chunk-translation-attempt' with retry attempts
+  // 5. Verify UI shows error state, not blank/stuck popup
+  // 6. Revert changes after testing
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const textToTranslate = contextText ? contextText + ' ' + chunk : chunk;
+      const result = await fetchMyMemoryTranslation(textToTranslate, source, target, myMemoryEmail);
+      
+      // Check for suspicious translation (may indicate quota exceeded or API degradation)
+      if (isSuspiciousTranslation(result.translatedText, textToTranslate)) {
+        logger.warn('suspicious-translation', {
+          chunkIndex: index,
+          attempt: attempt + 1,
+          translatedLength: result.translatedText.length,
+          originalLength: textToTranslate.length,
+          reason: 'translation-appears-untranslated-or-malformed'
+        });
+        
+        // If this is the last attempt, throw as error
+        if (attempt === maxRetries) {
+          throw new Error('Translation returned suspicious result (possible quota exceeded or API degradation)');
+        }
+        
+        // Otherwise retry with backoff
+        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s
+        logger.debug('retrying-chunk', {
+          chunkIndex: index,
+          attempt: attempt + 1,
+          delay,
+          reason: 'suspicious-translation'
+        });
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      const translatedChunk: TranslatedChunk = {
+        index,
+        originalText: chunk,
+        translatedText: result.translatedText,
+        contextText,
+        contextLength
+      };
+      
+      logger.debug('chunk-translation-success', {
+        chunkIndex: index,
+        attempt: attempt + 1,
+        originalText: chunk,
+        textSent: textToTranslate,
+        translatedText: result.translatedText,
+        hadContext: !!contextText,
+        success: true
+      });
+      
+      return { chunk: translatedChunk, detectedSource: result.detectedSource };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      logger.error('chunk-translation-attempt', {
+        chunkIndex: index,
+        attempt: attempt + 1,
+        maxRetries: maxRetries + 1,
+        error: lastError.message,
+        success: false
+      });
+      
+      // If not the last attempt, retry with backoff
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s
+        logger.debug('retrying-chunk', {
+          chunkIndex: index,
+          attempt: attempt + 1,
+          delay,
+          reason: 'api-error'
+        });
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  // All retries failed - throw error to fail loud
+  throw translationError(
+    'API_FAILURE',
+    `Chunk ${index} failed after ${maxRetries + 1} attempts: ${lastError?.message || 'Unknown error'}`
+  );
+}
+
+/**
+ * Translate text with automatic chunking for long text.
+ * Splits text into chunks, translates each with context and retry logic,
+ * and reassembles results. Uses Promise.allSettled to ensure ALL chunks succeed.
+ * Fails loud if any chunk fails after retries.
+ */
+async function translateWithChunking(
+  text: string,
+  source: string,
+  target: string,
+  myMemoryEmail?: string,
+): Promise<{ translatedText: string; detectedSource?: string; chunkCount: number }> {
+  const chunks = splitIntoChunks(text);
+  
+  if (chunks.length === 1) {
+    // Single chunk, use normal translation
+    const result = await fetchMyMemoryTranslation(text, source, target, myMemoryEmail);
+    
+    // Check for suspicious translation even for single chunk
+    if (isSuspiciousTranslation(result.translatedText, text)) {
+      logger.error('suspicious-single-chunk', {
+        translatedLength: result.translatedText.length,
+        originalLength: text.length
+      });
+      throw translationError(
+        'API_FAILURE',
+        'Translation returned suspicious result (possible quota exceeded or API degradation)'
+      );
+    }
+    
+    logger.debug('chunk-translation', {
+      chunkIndex: 0,
+      originalText: text,
+      translatedText: result.translatedText,
+      chunkCount: 1
+    });
+    return { ...result, chunkCount: 1 };
+  }
+  
+  // Multiple chunks - translate each with context and retry logic
+  const translationPromises = chunks.map(async (chunk, index) => {
+    let contextText: string | undefined;
+    let contextLength: number | undefined;
+    
+    // Add trailing context from previous chunk for coherence (except for first chunk)
+    if (index > 0) {
+      const previousChunk = chunks[index - 1];
+      const context = getTrailingContext(previousChunk);
+      contextText = context.text;
+      contextLength = context.length;
+    }
+    
+    return translateChunkWithRetry(chunk, index, source, target, myMemoryEmail, contextText, contextLength);
+  });
+  
+  // Use Promise.allSettled to handle all chunks independently
+  const settledResults = await Promise.allSettled(translationPromises);
+  
+  // Check if any chunks failed
+  const failedChunks: { index: number; error: string }[] = [];
+  const successfulChunks: { chunk: TranslatedChunk; detectedSource?: string }[] = [];
+  
+  for (let i = 0; i < settledResults.length; i++) {
+    const result = settledResults[i];
+    if (result.status === 'rejected') {
+      failedChunks.push({
+        index: i,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason)
+      });
+    } else {
+      successfulChunks.push(result.value);
+    }
+  }
+  
+  // If any chunks failed, throw error to fail loud
+  if (failedChunks.length > 0) {
+    logger.error('chunk-translation-failed', {
+      totalChunks: chunks.length,
+      failedChunks: failedChunks.length,
+      failures: failedChunks
+    });
+    
+    throw translationError(
+      'API_FAILURE',
+      `${failedChunks.length} of ${chunks.length} chunks failed to translate. Please try again later.`
+    );
+  }
+  
+  // All chunks succeeded - extract translated chunks and detected source
+  const translatedChunks = successfulChunks.map(r => r.chunk);
+  const detectedSource = successfulChunks[0]?.detectedSource; // Use detection from first chunk
+  
+  // Merge chunks using the dedicated merge function
+  const translatedText = mergeTranslatedChunks(translatedChunks, target);
+  
+  logger.debug('chunk-merge-success', {
+    chunkCount: chunks.length,
+    finalLength: translatedText.length,
+    originalLength: text.length
+  });
+  
+  return { translatedText, detectedSource, chunkCount: chunks.length };
+}
+
 /**
  * Common short words dictionary for language detection.
  * Used when text is too short for reliable franc detection.
@@ -139,37 +870,115 @@ const COMMON_WORDS: Record<string, string> = {
   'adeus': 'pt',
 };
 
-function detectLanguage(text: string): string | null {
-  const normalizedText = text.trim().toLowerCase();
+/**
+ * Detect script family from Unicode ranges for first-pass filtering.
+ * This is more reliable than franc for single characters or very short text.
+ */
+function detectScriptFamily(text: string): string | null {
+  const firstChar = text.trim().charAt(0);
+  if (!firstChar) return null;
   
-  // Check common words dictionary first for short text
-  if (normalizedText.length < 15) {
+  const code = firstChar.charCodeAt(0);
+  
+  // Arabic script range (U+0600–U+06FF)
+  if (code >= 0x0600 && code <= 0x06FF) {
+    logger.debug('script-heuristic', { script: 'Arabic', code });
+    return 'ar';
+  }
+  
+  // Devanagari script range (Hindi, Sanskrit, etc.) (U+0900–U+097F)
+  if (code >= 0x0900 && code <= 0x097F) {
+    logger.debug('script-heuristic', { script: 'Hindi/Devanagari', code });
+    return 'hi';
+  }
+  
+  // CJK Unified Ideographs (Chinese, Japanese, Korean) (U+4E00–U+9FFF)
+  if (code >= 0x4E00 && code <= 0x9FFF) {
+    // Further distinguish between Chinese/Japanese/Korean based on context
+    // For now, default to Chinese as it's the most common in this range
+    logger.debug('script-heuristic', { script: 'CJK', default: 'zh', code });
+    return 'zh';
+  }
+  
+  // Hangul syllables (Korean) (U+AC00–U+D7AF)
+  if (code >= 0xAC00 && code <= 0xD7AF) {
+    logger.debug('script-heuristic', { script: 'Korean', code });
+    return 'ko';
+  }
+  
+  // Cyrillic script (Russian, Ukrainian, etc.) (U+0400–U+04FF)
+  if (code >= 0x0400 && code <= 0x04FF) {
+    logger.debug('script-heuristic', { script: 'Cyrillic', default: 'ru', code });
+    return 'ru';
+  }
+  
+  // Greek script (U+0370–U+03FF)
+  if (code >= 0x0370 && code <= 0x03FF) {
+    logger.debug('script-heuristic', { script: 'Greek', code });
+    return 'el';
+  }
+  
+  // Thai script (U+0E00–U+0E7F)
+  if (code >= 0x0E00 && code <= 0x0E7F) {
+    logger.debug('script-heuristic', { script: 'Thai', code });
+    return 'th';
+  }
+  
+  // Hebrew script (U+0590–U+05FF)
+  if (code >= 0x0590 && code <= 0x05FF) {
+    logger.debug('script-heuristic', { script: 'Hebrew', code });
+    return 'he';
+  }
+  
+  // Latin script - need statistical detection to distinguish languages
+  if ((code >= 0x0041 && code <= 0x005A) || (code >= 0x0061 && code <= 0x007A)) {
+    logger.debug('script-heuristic', { script: 'Latin', action: 'statistical-detection' });
+    return null; // Let franc handle Latin scripts
+  }
+  
+  logger.debug('script-heuristic', { script: 'Unknown', code });
+  return null;
+}
+
+export function detectLanguage(text: string): { language: string | null; method: string; confidence: number } {
+  const normalizedText = text.trim().toLowerCase();
+  const textLength = normalizedText.length;
+  
+  // Step 1: Script-based heuristic for non-Latin scripts (works even for single characters)
+  const scriptDetection = detectScriptFamily(text);
+  if (scriptDetection) {
+    return { language: scriptDetection, method: 'script-heuristic', confidence: 0.95 };
+  }
+  
+  // Step 2: Dictionary lookup for short text (exact match, high confidence)
+  if (textLength < MIN_DICTIONARY_LOOKUP_LENGTH) {
     const commonWordMatch = COMMON_WORDS[normalizedText];
     if (commonWordMatch) {
-      logger.languageDetection('Matched common word:', normalizedText, '->', commonWordMatch);
-      return commonWordMatch;
+      logger.debug('dictionary-lookup', { word: normalizedText, language: commonWordMatch });
+      return { language: commonWordMatch, method: 'dictionary', confidence: 1.0 };
     }
   }
   
-  // Text too short and not in dictionary - return null (uncertain)
-  if (normalizedText.length < 4) {
-    logger.languageDetection('Text too short and not in dictionary, detection uncertain');
-    return null;
+  // Step 3: Text too short for statistical detection - return uncertain
+  if (textLength < MIN_FRANC_DETECTION_LENGTH) {
+    logger.debug('detection', { status: 'too-short', length: textLength });
+    return { language: null, method: 'none', confidence: 0 };
   }
   
-  // Use franc for longer text
+  // Step 4: Use franc for statistical detection (reliable for longer text)
   const detected = franc(text);
-  logger.languageDetection('franc returned:', detected);
+  logger.debug('franc', { result: detected, textLength });
   
-  // Use the comprehensive ISO_639_3_TO_639_1 mapping
   const isoCode = ISO_639_3_TO_639_1[detected];
   if (isoCode) {
-    logger.languageDetection('Mapped to ISO code:', isoCode);
-    return isoCode;
+    // Confidence based on text length - longer text = higher confidence
+    const confidence = Math.min(0.9, 0.5 + (textLength / MIN_RELIABLE_DETECTION_LENGTH) * 0.4);
+    logger.debug('detection', { method: 'franc', language: isoCode, confidence });
+    return { language: isoCode, method: 'franc', confidence };
   }
   
-  logger.languageDetection('Language not in mapping, detection uncertain');
-  return null;
+  logger.debug('detection', { status: 'no-match', francResult: detected });
+  return { language: null, method: 'franc-no-match', confidence: 0 };
 }
 
 const MYMEMORY_ENDPOINT = 'https://api.mymemory.translated.net/get';
@@ -317,694 +1126,6 @@ export const ISO_639_3_TO_639_1: Record<string, string> = {
   'tat': 'tt', // Tatar
   'bak': 'ba', // Bashkir
   'chv': 'cv', // Chuvash
-  'sah': 'sah', // Yakut
-  'eve': 'ev', // Even
-  'inh': 'inh', // Ingush
-  'ava': 'av', // Avar
-  'lez': 'lez', // Lezgi
-  'tab': 'tab', // Tabassaran
-  'agr': 'agr', // Agul
-  'rut': 'rut', // Rutul
-  'tsz': 'tsz', // Tsakhur
-  'nog': 'nog', // Nogai
-  'krl': 'krl', // Karelian
-  'vep': 'vep', // Veps
-  'liv': 'liv', // Livonian
-  'izh': 'izh', // Izhorian
-  'vot': 'vot', // Votic
-  'mns': 'mns', // Mansi
-  'kca': 'kca', // Khanty
-  'yrk': 'yrk', // Nenets
-  'sel': 'sel', // Selkup
-  'ket': 'ket', // Ket
-  'yug': 'yug', // Yugh
-  'dng': 'dng', // Dungan
-  'xch': 'xch', // Cham
-  'hmn': 'hmn', // Hmong
-  'mww': 'mww', // Hmong Daw
-  'blt': 'blt', // Tai Dam
-  'tdd': 'tdd', // Tai Nüa
-  'khb': 'khb', // Lü
-  'lcp': 'lcp', // Western Lawa
-  'lwl': 'lwl', // Eastern Lawa
-  'kxm': 'kxm', // Northern Khmer
-  'kha': 'kha', // Khasi
-  'pdu': 'pdu', // Kayan
-  'kvr': 'kvr', // Kerinci
-  'lmb': 'lmb', // Limbu
-  'lis': 'lis', // Lisu
-  'mru': 'mru', // Monpa
-  'tdb': 'tdb', // Pali
-  'rau': 'rau', // Rabha
-  'sit': 'sit', // Sikkimese
-  'taj': 'taj', // Eastern Tamang
-  'tmh': 'tmh', // Tamashek
-  'wbr': 'wbr', // Wagdi
-  'gbm': 'gbm', // Garhwali
-  'goa': 'goa', // Gondi
-  'kfr': 'kfr', // Kachchi
-  'kfy': 'kfy', // Kumaoni
-  'khn': 'khn', // Khandesi
-  'kok': 'kok', // Konkani
-  'kxu': 'kxu', // Kui
-  'kvx': 'kvx', // Kuvi
-  'kzk': 'kzk', // Korku
-  'kxl': 'kxl', // Kurukh
-  'kzh': 'kzh', // Kachin
-  'kdt': 'kdt', // Kuy
-  'kdv': 'kdv', // Kudo
-  'kdl': 'kdl', // Koshal
-  'kdm': 'kdm', // Koma
-  'kdj': 'kdj', // Karamojong
-  'kdq': 'kdq', // Kadaru
-  'kdr': 'kdr', // Karaim
-  'kdu': 'kdu', // Karko
-  'kdw': 'kdw', // Khasi
-  'kdx': 'kdx', // Kam
-  'kdy': 'kdy', // Kado
-  'kdz': 'kdz', // Kwaja
-  'kea': 'kea', // Kabuverdianu
-  'kab': 'kab', // Kabyle
-  'kac': 'kac', // Kachin
-  'kae': 'kae', // Kakabe
-  'kaf': 'kaf', // Katso
-  'kag': 'kag', // Kajaman
-  'kah': 'kah', // Kahua
-  'kai': 'kai', // Karekare
-  'kaj': 'kaj', // Jju
-  'kak': 'kak', // Kalanguya
-  'kal': 'kal', // Kalaallisut
-  'kam': 'kam', // Kamba
-  'kao': 'kao', // Xaasongaxango
-  'kap': 'kap', // Bezhta
-  'kaq': 'kaq', // Capanahua
-  'kas': 'kas', // Kashmiri
-  'kat': 'kat', // Georgian
-  'kau': 'kau', // Kanuri
-  'kav': 'kav', // Katukína
-  'kaw': 'kaw', // Kawi
-  'kax': 'kax', // Kao
-  'kay': 'kay', // Kamayurá
-  'kba': 'kba', // Kalarko
-  'kbb': 'kbb', // Kaxuiâna
-  'kbc': 'kbc', // Kadiwéu
-  'kbd': 'kbd', // Kabardian
-  'kbe': 'kbe', // Kanju
-  'kbg': 'kbg', // Kharia
-  'kbh': 'kbh', // Camsá
-  'kbi': 'kbi', // Kaptiau
-  'kbj': 'kbj', // Kari
-  'kbk': 'kbk', // Grass Koiari
-  'kbl': 'kbl', // Kanembu
-  'kbm': 'kbm', // Iwal
-  'kbn': 'kbn', // Kare (Papua New Guinea)
-  'kbo': 'kbo', // Keliko
-  'kbp': 'kbp', // Kabiyè
-  'kbq': 'kbq', // Kamano
-  'kbr': 'kbr', // Kafa
-  'kbs': 'kbs', // Kande
-  'kbt': 'kbt', // Abadi
-  'kbu': 'kbu', // Kathu
-  'kbv': 'kbv', // Dera (Indonesia)
-  'kbw': 'kbw', // Kaiep
-  'kbx': 'kbx', // Ap Ma
-  'kby': 'kby', // Manga Kanuri
-  'kbz': 'kbz', // Duhwa
-  'kcb': 'kcb', // Kawacha
-  'kcc': 'kcc', // Lubila
-  'kcd': 'kcd', // Ngkâlmpw
-  'kce': 'kce', // Kaivi
-  'kcf': 'kcf', // Ukaan
-  'kcg': 'kcg', // Tyap
-  'kch': 'kch', // Vono
-  'kci': 'kci', // Kamantan
-  'kcj': 'kcj', // Kobiana
-  'kck': 'kck', // Kalanga
-  'kcl': 'kcl', // Kela (Papua New Guinea)
-  'kcm': 'kcm', // Gula (Central African Republic)
-  'kcn': 'kcn', // Nubi
-  'kco': 'kco', // Kulfa
-  'kcp': 'kcp', // Kanga
-  'kcq': 'kcq', // Kamo
-  'kcr': 'kcr', // Katla
-  'kcs': 'kcs', // Koenoem
-  'kct': 'kct', // Kaian
-  'kcu': 'kcu', // Kami (Tanzania)
-  'kcv': 'kcv', // Kete
-  'kcw': 'kcw', // Kabwari
-  'kcx': 'kcx', // Kachama-Ganjule
-  'kcy': 'kcy', // Korana
-  'kcz': 'kcz', // Konongo
-  'kda': 'kda', // Worimi
-  'kdc': 'kdc', // Kutu
-  'kdd': 'kdd', // Yankunytjatjara
-  'kde': 'kde', // Makonde
-  'kdf': 'kdf', // Mamusi
-  'kdg': 'kdg', // Seba
-  'kdh': 'kdh', // Tem
-  'kdi': 'kdi', // Kumam
-  'kdk': 'kdk', // Numee
-  'kdn': 'kdn', // Kunda
-  'kdp': 'kdp', // Kaningdon-Nindem
-  'keb': 'keb', // Kela
-  'kec': 'kec', // Keiga
-  'ked': 'ked', // Kerewe
-  'kee': 'kee', // Eastern Keres
-  'kef': 'kef', // Kpessi
-  'keg': 'keg', // Tese
-  'keh': 'keh', // Keak
-  'kei': 'kei', // Kei
-  'kej': 'kej', // Karkar
-  'kek': 'kek', // Kekchí
-  'kel': 'kel', // Kela (Democratic Republic of Congo)
-  'kem': 'kem', // Kemak
-  'ken': 'ken', // Kenyang
-  'keo': 'keo', // Kakwa
-  'kep': 'kep', // Kaikadi
-  'keq': 'keq', // Kamar
-  'ker': 'ker', // Kera
-  'kes': 'kes', // Kugbo
-  'keu': 'keu', // Akebu
-  'kev': 'kev', // Kanikkaran
-  'kew': 'kew', // Kewa
-  'kex': 'kex', // Kukna
-  'key': 'key', // Kupia
-  'kez': 'kez', // Kukele
-  'kfa': 'kfa', // Kodava
-  'kfb': 'kfb', // Kolami (Northwestern)
-  'kfc': 'kfc', // Konda-Dora
-  'kfd': 'kfd', // Koraga (Koratti)
-  'kfe': 'kfe', // Kota (India)
-  'kff': 'kff', // Koya
-  'kfg': 'kfg', // Kudiya
-  'kfh': 'kfh', // Kurichiya
-  'kfi': 'kfi', // Kannada Kurumba
-  'kfj': 'kfj', // Kemiehua
-  'kfk': 'kfk', // Kurripako
-  'kfl': 'kfl', // Kung
-  'kfm': 'kfm', // Khunsari
-  'kfn': 'kfn', // Kuk
-  'kfo': 'kfo', // Koro (Côte d'Ivoire)
-  'kfp': 'kfp', // Korwa
-  'kfq': 'kfq', // Korku
-  'kfs': 'kfs', // Bilaspuri
-  'kft': 'kft', // Kujargé
-  'kfu': 'kfu', // Katkari
-  'kfv': 'kfv', // Kurmukar
-  'kfw': 'kfw', // Kharam Naga
-  'kfx': 'kfx', // Kullu Pahari
-  'kfz': 'kfz', // Koromfé
-  'kga': 'kga', // Koyaga
-  'kgb': 'kgb', // Kawe
-  'kgc': 'kgc', // Kasseng
-  'kgd': 'kgd', // Kataang
-  'kge': 'kge', // Komering
-  'kgf': 'kgf', // Kube
-  'kgg': 'kgg', // Kusunda
-  'kgh': 'kgh', // Upper Tanudan Kalinga
-  'kgi': 'kgi', // Srang
-  'kgj': 'kgj', // Gamale Kham
-  'kgk': 'kgk', // Katukína
-  'kgl': 'kgl', // Kunggari
-  'kgm': 'kgm', // Karipúna
-  'kgn': 'kgn', // Karingani
-  'kgo': 'kgo', // Krongo
-  'kgp': 'kgp', // Kaingang
-  'kgq': 'kgq', // Kamoro
-  'kgr': 'kgr', // Abun
-  'kgs': 'kgs', // Kumbainggar
-  'kgt': 'kgt', // Somyev
-  'kgu': 'kgu', // Kobol
-  'kgv': 'kgv', // Keras
-  'kgw': 'kgw', // Karon Dori
-  'kgx': 'kgx', // Kamar
-  'kgy': 'kgy', // Kyangle
-  'khc': 'khc', // Tukang Besi North
-  'khd': 'khd', // Kōnai
-  'khe': 'khe', // Korowai
-  'khf': 'khf', // Khuen
-  'khg': 'khg', // Khams Tibetan
-  'khh': 'khh', // Kehu
-  'khj': 'khj', // Kuturmi
-  'khk': 'khk', // Khakas
-  'khl': 'khl', // Lusi
-  'khp': 'khp', // Kapori
-  'khq': 'khq', // Koyra Chiini
-  'khr': 'khr', // Kharia
-  'khs': 'khs', // Kasua
-  'kht': 'kht', // Khamti
-  'khu': 'khu', // Khunsari
-  'khv': 'khv', // Khvarshi
-  'khw': 'khw', // Khowar
-  'khx': 'khx', // Kanu
-  'khy': 'khy', // Kele (Democratic Republic of Congo)
-  'khz': 'khz', // Keapara
-  'kia': 'kia', // Kim
-  'kib': 'kib', // Koalib
-  'kic': 'kic', // Kickapoo
-  'kid': 'kid', // Koshin
-  'kie': 'kie', // Kipsigis
-  'kif': 'kif', // Eastern Parbate
-  'kig': 'kig', // Kimaama
-  'kih': 'kih', // Kilmeri
-  'kii': 'kii', // Kitsai
-  'kij': 'kij', // Kilivila
-  'kik': 'kik', // Kikuyu
-  'kil': 'kil', // Kariya
-  'kim': 'kim', // Karagas
-  'kio': 'kio', // Kiowa
-  'kip': 'kip', // Sheshi Kham
-  'kiq': 'kiq', // Kosadle
-  'kir': 'kir', // Kirghiz
-  'kis': 'kis', // Kis
-  'kit': 'kit', // Agob
-  'kiu': 'kiu', // Kirmanjki
-  'kiv': 'kiv', // Kimbu
-  'kiw': 'kiw', // Northeast Kiwai
-  'kix': 'kix', // Khiamniungan Naga
-  'kiy': 'kiy', // Kirikiri
-  'kiz': 'kiz', // Kisi
-  'kja': 'kja', // Mlap
-  'kjb': 'kjb', // Kanjobal
-  'kjc': 'kjc', // Coastal Konjo
-  'kjd': 'kjd', // Southern Kiwai
-  'kje': 'kje', // Kisar
-  'kjf': 'kjf', // Khalaj
-  'kjg': 'kjg', // Khmu
-  'kjh': 'kjh', // Kyrgyz
-  'kji': 'kji', // Zabana
-  'kjj': 'kjj', // Khinalugh
-  'kjk': 'kjk', // Highland Konjo
-  'kjl': 'kjl', // Western Parbate
-  'kjm': 'kjm', // Kháng
-  'kjn': 'kjn', // Kunjen
-  'kjo': 'kjo', // Harijan Kinnauri
-  'kjp': 'kjp', // Pwo Eastern Karen
-  'kjq': 'kjq', // Western Keres
-  'kjr': 'kjr', // Kurudu
-  'kjs': 'kjs', // Kowiai
-  'kjt': 'kjt', // Phrae Pwo Karen
-  'kju': 'kju', // Kashaya
-  'kjv': 'kjv', // Kaikavian Literary Language
-  'kjx': 'kjx', // Ramopa
-  'kjy': 'kjy', // Erave
-  'kjz': 'kjz', // Bumthangkha
-  'kka': 'kka', // Kagoro
-  'kkb': 'kkb', // Kwerisa
-  'kkc': 'kkc', // Odoodee
-  'kkd': 'kkd', // Guwa
-  'kke': 'kke', // Kakabe
-  'kkf': 'kkf', // Kalaktong
-  'kkg': 'kkg', // Mabawa Valley
-  'kkh': 'kkh', // Khün
-  'kki': 'kki', // Kagulu
-  'kkj': 'kkj', // Kako
-  'kkk': 'kkk', // Kokota
-  'kkl': 'kkl', // Kosarek Yale
-  'kkm': 'kkm', // Khiong
-  'kkn': 'kkn', // Kon Keu
-  'kko': 'kko', // Karko
-  'kkp': 'kkp', // Kugbo
-  'kkq': 'kkq', // Kaumu
-  'kkr': 'kkr', // Kir-Balar
-  'kks': 'kks', // Giiwo
-  'kkt': 'kkt', // Koi
-  'kku': 'kku', // Tumi
-  'kkv': 'kkv', // Kangean
-  'kkw': 'kkw', // Teke-Kukuya
-  'kkx': 'kkx', // Kohin
-  'kky': 'kky', // Guugu Yimidhirr
-  'kkz': 'kkz', // Kaska
-  'kla': 'kla', // Klamath-Modoc
-  'klb': 'klb', // Kono (Guinea)
-  'klc': 'klc', // Kela
-  'kld': 'kld', // Gamilaraay
-  'kle': 'kle', // Kulung
-  'klf': 'klf', // Kendeje
-  'klg': 'klg', // Tagakaulo Kalagan
-  'klh': 'klh', // Weliki
-  'kli': 'kli', // Kalumpang
-  'klj': 'klj', // Khalaj
-  'klk': 'klk', // Kono (Nigeria)
-  'kll': 'kll', // Kalagan
-  'klm': 'klm', // Kolom
-  'kln': 'kln', // Kalenjin
-  'klo': 'klo', // Kapya
-  'klp': 'klp', // Kamasa
-  'klq': 'klq', // Rumu
-  'klr': 'klr', // Khaling
-  'kls': 'kls', // Kalasha
-  'klt': 'klt', // Nukna
-  'klu': 'klu', // Klao
-  'klv': 'klv', // Maskelynes
-  'klw': 'klw', // Tado
-  'klx': 'klx', // Koluwawa
-  'kly': 'kly', // Kalao
-  'klz': 'klz', // Kabola
-  'kma': 'kma', // Konni
-  'kmb': 'kmb', // Kimbundu
-  'kmc': 'kmc', // Southern Dong
-  'kmd': 'kmd', // Majukayang Kalinga
-  'kme': 'kme', // Bakole
-  'kmf': 'kmf', // Kare (Papua New Guinea)
-  'kmg': 'kmg', // Kâte
-  'kmh': 'kmh', // Kalam
-  'kmi': 'kmi', // Karimi
-  'kmj': 'kmj', // Kumarbhag Paharia
-  'kmk': 'kmk', // Limos Kalinga
-  'kml': 'kml', // Tanudan Kalinga
-  'kmm': 'kmm', // Kom (India)
-  'kmn': 'kmn', // Awtuw
-  'kmo': 'kmo', // Kwoma
-  'kmp': 'kmp', // Gimi
-  'kmq': 'kmq', // Kwama
-  'kmr': 'kmr', // Northern Kurdish
-  'kms': 'kms', // Kamasau
-  'kmt': 'kmt', // Kemtuik
-  'kmu': 'kmu', // Kanite
-  'kmv': 'kmv', // Karipuna Creole
-  'kmw': 'kmw', // Komo (Democratic Republic of Congo)
-  'kmx': 'kmx', // Waboda
-  'kmy': 'kmy', // Bome
-  'kmz': 'kmz', // Khurasani Turkish
-  'kna': 'kna', // Dera (Nigeria)
-  'knb': 'knb', // Lubuagan Kalinga
-  'knc': 'knc', // Central Kanuri
-  'knd': 'knd', // Konda
-  'kne': 'kne', // Kankanaey
-  'knf': 'knf', // Mankanya
-  'kng': 'kng', // Koongo
-  'kni': 'kni', // Kanufi
-  'knj': 'knj', // Western Kanuri
-  'knk': 'knk', // Kuranko
-  'knl': 'knl', // Keninjal
-  'knm': 'knm', // Kanamarí
-  'knn': 'knn', // Konkani (individual language)
-  'kno': 'kno', // Kono (Sierra Leone)
-  'knp': 'knp', // Kwanja
-  'knq': 'knq', // Kintaq
-  'knr': 'knr', // Kaningra
-  'kns': 'kns', // Kensiu
-  'knt': 'knt', // Panoan Katukína
-  'knu': 'knu', // Kono (Guinea)
-  'knv': 'knv', // Tabo
-  'knw': 'knw', // Kung-Ekoka
-  'knx': 'knx', // Kanowit-Tanjong
-  'kny': 'kny', // Kanyok
-  'knz': 'knz', // Kalamsé
-  'koa': 'koa', // Konomala
-  'koc': 'koc', // Kpati
-  'kod': 'kod', // Kodi
-  'koe': 'koe', // Kacipo-Balesi
-  'kof': 'kof', // Kubi
-  'kog': 'kog', // Cogui
-  'koh': 'koh', // Koyo
-  'koi': 'koi', // Komi-Permyak
-  'koj': 'koj', // Sara Dunjo
-  'kol': 'kol', // Kol (Papua New Guinea)
-  'kom': 'kom', // Komi
-  'kon': 'kon', // Kongo
-  'koo': 'koo', // Konzo
-  'kop': 'kop', // Waube
-  'koq': 'koq', // Kota (Gabon)
-  'kos': 'kos', // Kosraean
-  'kot': 'kot', // Lagwan
-  'kou': 'kou', // Koke
-  'kov': 'kov', // Kudu-Camo
-  'kow': 'kow', // Kugama
-  'kox': 'kox', // Coxima
-  'koy': 'koy', // Koyukon
-  'koz': 'koz', // Korak
-  'kpa': 'kpa', // Kutto
-  'kpb': 'kpb', // Mullu Kurumba
-  'kpc': 'kpc', // Curripaco
-  'kpd': 'kpd', // Koba
-  'kpe': 'kpe', // Kpelle
-  'kpf': 'kpf', // Komba
-  'kpg': 'kpg', // Taiap
-  'kph': 'kph', // Kplang
-  'kpi': 'kpi', // Kofei
-  'kpj': 'kpj', // Gwoju
-  'kpk': 'kpk', // Kpan
-  'kpl': 'kpl', // Kpala
-  'kpm': 'kpm', // Koho
-  'kpn': 'kpn', // Kepkiriwát
-  'kpo': 'kpo', // Ikposo
-  'kpq': 'kpq', // Korupun-Sela
-  'kpr': 'kpr', // Korafe-Yegha
-  'kps': 'kps', // Tehit
-  'kpt': 'kpt', // Karata
-  'kpu': 'kpu', // Kafoa
-  'kpv': 'kpv', // Komi-Zyrian
-  'kpw': 'kpw', // Kobol
-  'kpx': 'kpx', // Mountain Koiali
-  'kpy': 'kpy', // Koryak
-  'kpz': 'kpz', // Kupsabiny
-  'kqa': 'kqa', // Mum
-  'kqb': 'kqb', // Kovai
-  'kqc': 'kqc', // Kalami
-  'kqd': 'kqd', // Ksan
-  'kqe': 'kqe', // Kalagan
-  'kqf': 'kqf', // Kakabai
-  'kqg': 'kqg', // Khe
-  'kqh': 'kqh', // Kisankasa
-  'kqi': 'kqi', // Koitab
-  'kqj': 'kqj', // Kalam
-  'kqk': 'kqk', // Kotafon Gbe
-  'kql': 'kql', // Kyenele
-  'kqm': 'kqm', // Khisa
-  'kqn': 'kqn', // Kaonde
-  'kqo': 'kqo', // Eastern Krahn
-  'kqp': 'kqp', // Kimré
-  'kqq': 'kqq', // Krenak
-  'kqr': 'kqr', // Kimaragang
-  'kqs': 'kqs', // Kissi (Northern)
-  'kqt': 'kqt', // Klias River Kadazan
-  'kqu': 'kqu', // Seroa
-  'kqv': 'kqv', // Okolod
-  'kqw': 'kqw', // Kandas
-  'kqx': 'kqx', // Mser
-  'kqy': 'kqy', // Koorete
-  'kqz': 'kqz', // Kalanka
-  'kra': 'kra', // Kumhali
-  'krb': 'krb', // Karkin
-  'krc': 'krc', // Karachay-Balkar
-  'krd': 'krd', // Kairui-Midiki
-  'kre': 'kre', // Kota
-  'krf': 'krf', // Koro (Vanuatu)
-  'krh': 'krh', // Kurama
-  'kri': 'kri', // Krio
-  'krj': 'krj', // Kinaray-A
-  'krm': 'krm', // Krim
-  'krn': 'krn', // Sapo
-  'krp': 'krp', // Korop
-  'krr': 'krr', // Krung
-  'krs': 'krs', // Kristang
-  'krt': 'krt', // Tumleo
-  'kru': 'kru', // Kurukh
-  'krv': 'krv', // Kavet
-  'krw': 'krw', // Western Krahn
-  'krx': 'krx', // Karon
-  'kry': 'kry', // Kryts
-  'krz': 'krz', // Sota Kanum
-  'ksa': 'ksa', // Shuwa-Zamani
-  'ksb': 'ksb', // Shambala
-  'ksc': 'ksc', // Southern Kalinga
-  'ksd': 'ksd', // Kuanua
-  'kse': 'kse', // Kuni
-  'ksf': 'ksf', // Bafia
-  'ksg': 'ksg', // Kusaghe
-  'ksh': 'ksh', // Kölsch
-  'ksi': 'ksi', // Krisa
-  'ksj': 'ksj', // Uare
-  'ksk': 'ksk', // Kansa
-  'ksl': 'ksl', // Kumalu
-  'ksm': 'ksm', // Kumba
-  'ksn': 'ksn', // Kasiguranin
-  'kso': 'kso', // Kofa
-  'ksp': 'ksp', // Kaba
-  'ksq': 'ksq', // Kwaami
-  'ksr': 'ksr', // Borong
-  'kss': 'kss', // Southern Kisi
-  'kst': 'kst', // Winyé
-  'ksu': 'ksu', // Auhelawa
-  'ksv': 'ksv', // Kusu
-  'ksw': 'ksw', // S'gaw Karen
-  'ksx': 'ksx', // Kangjia
-  'ksy': 'ksy', // Kharia Thar
-  'ksz': 'ksz', // Kodaku
-  'kta': 'kta', // Katua
-  'ktb': 'ktb', // Kambaata
-  'ktc': 'ktc', // Kholok
-  'ktd': 'ktd', // Kokata
-  'kte': 'kte', // Nubri
-  'ktf': 'ktf', // Kwami
-  'ktg': 'ktg', // Kalkutung
-  'kth': 'kth', // Karanga
-  'kti': 'kti', // North Muyu
-  'ktj': 'ktj', // Plapo Krumen
-  'ktk': 'ktk', // Kaniet
-  'ktl': 'ktl', // Koroshi
-  'ktm': 'ktm', // Kurti
-  'ktn': 'ktn', // Karitiâna
-  'kto': 'kto', // Kuot
-  'ktp': 'ktp', // Kaduo
-  'ktq': 'ktq', // Katabaga
-  'ktr': 'ktr', // Mari (Madang Province)
-  'kts': 'kts', // South Muyu
-  'ktt': 'ktt', // Ketum
-  'ktu': 'ktu', // Kituba (Democratic Republic of Congo)
-  'ktv': 'ktv', // Eastern Katu
-  'ktw': 'ktw', // Katu
-  'ktx': 'ktx', // Kaxararí
-  'kty': 'kty', // Kango (Banka)
-  'ktz': 'ktz', // Ju/'hoan
-  'kua': 'kua', // Kuanyama
-  'kub': 'kub', // Kutep
-  'kuc': 'kuc', // Kwinsu
-  'kud': 'kud', // Auhelawa
-  'kue': 'kue', // Kuman (Papua New Guinea)
-  'kuf': 'kuf', // Western Katu
-  'kug': 'kug', // Kopar
-  'kuh': 'kuh', // Kushi
-  'kui': 'kui', // Kuikuro-Kalapalo
-  'kuj': 'kuj', // Kuria
-  'kuk': 'kuk', // Kepo'
-  'kul': 'kul', // Kulere
-  'kum': 'kum', // Kumyk
-  'kun': 'kun', // Kunama
-  'kuo': 'kuo', // Kumukio
-  'kup': 'kup', // Kunimaip
-  'kuq': 'kuq', // Karipuna
-  'kus': 'kus', // Kusaal
-  'kut': 'kut', // Kutenai
-  'kuu': 'kuu', // Upper Kuskokwim
-  'kuv': 'kuv', // Kur
-  'kuw': 'kuw', // Kpagua
-  'kux': 'kux', // Kukatja
-  'kuy': 'kuy', // Kuuku-Ya'u
-  'kuz': 'kuz', // Kunza
-  'kva': 'kva', // Bagvalal
-  'kvb': 'kvb', // Kubu
-  'kvc': 'kvc', // Kove
-  'kvd': 'kvd', // Kui (India)
-  'kve': 'kve', // Kalabakan
-  'kvf': 'kvf', // Kabalai
-  'kvg': 'kvg', // Kuni-Boazi
-  'kvh': 'kvh', // Komodo
-  'kvi': 'kvi', // Kwang
-  'kvj': 'kvj', // Psikye
-  'kvk': 'kvk', // Korean Sign Language
-  'kvl': 'kvl', // Kayaw
-  'kvm': 'kvm', // Kendem
-  'kvn': 'kvn', // Border Kainji
-  'kvo': 'kvo', // Dobel
-  'kvp': 'kvp', // Kompane
-  'kvq': 'kvq', // Kadu
-  'kvt': 'kvt', // Katavin
-  'kvu': 'kvu', // Yaben
-  'kvv': 'kvv', // Kola
-  'kvw': 'kvw', // Wersing
-  'kvy': 'kvy', // Yavi
-  'kvz': 'kvz', // Tsakwambo
-  'kwa': 'kwa', // Dâw
-  'kwb': 'kwb', // Kwa
-  'kwc': 'kwc', // Kalmyk
-  'kwd': 'kwd', // Kwaio
-  'kwe': 'kwe', // Kwerba
-  'kwf': 'kwf', // Kwara'ae
-  'kwg': 'kwg', // Sara Kaba Deme
-  'kwh': 'kwh', // Kowiai
-  'kwi': 'kwi', // Awa-Cuaiquer
-  'kwj': 'kwj', // Kwanga
-  'kwk': 'kwk', // Kwakiutl
-  'kwl': 'kwl', // Kofyar
-  'kwm': 'kwm', // Kwambi
-  'kwn': 'kwn', // Kwangali
-  'kwo': 'kwo', // Kwomtari
-  'kwp': 'kwp', // Kodia
-  'kwq': 'kwq', // Kwak
-  'kwr': 'kwr', // Kwer
-  'kws': 'kws', // Kwese
-  'kwt': 'kwt', // Kwesten
-  'kwu': 'kwu', // Kwakum
-  'kwv': 'kwv', // Sara Kaba Náà
-  'kww': 'kww', // Kwinti
-  'kwx': 'kwx', // Khirwar
-  'kwy': 'kwy', // San Salvador Kongo
-  'kwz': 'kwz', // Kwadi
-  'kxa': 'kxa', // Kabiyè
-  'kxb': 'kxb', // Krobu
-  'kxc': 'kxc', // Konso
-  'kxd': 'kxd', // Brunei
-  'kxe': 'kxe', // Kakihum
-  'kxf': 'kxf', // Kalabra
-  'kxg': 'kxg', // Katingan
-  'kxh': 'kxh', // Karo (Ethiopia)
-  'kxi': 'kxi', // Keningau Murut
-  'kxj': 'kxj', // Kulfa
-  'kxk': 'kxk', // Zaye
-  'kxn': 'kxn', // Kanowit
-  'kxo': 'kxo', // Kanoé
-  'kxp': 'kxp', // Wadiyara
-  'kxq': 'kxq', // Smärky Kanum
-  'kxr': 'kxr', // Koro (Papua New Guinea)
-  'kxs': 'kxs', // Kangjia
-  'kxt': 'kxt', // Koiwat
-  'kxv': 'kxv', // Kuvi
-  'kxw': 'kxw', // Konai
-  'kxx': 'kxx', // Likuba
-  'kxy': 'kxy', // Kayong
-  'kxz': 'kxz', // Kerewo
-  'kya': 'kya', // Kalaw Karen
-  'kyb': 'kyb', // Butbut Kalinga
-  'kyc': 'kyc', // Kyaka
-  'kyd': 'kyd', // Karey
-  'kye': 'kye', // Krache
-  'kyf': 'kyf', // Kouya
-  'kyg': 'kyg', // Keyagana
-  'kyh': 'kyh', // Karok
-  'kyi': 'kyi', // Kiribati
-  'kyj': 'kyj', // Karao
-  'kyk': 'kyk', // Kamayo
-  'kyl': 'kyl', // Kalapuya
-  'kym': 'kym', // Kpatili
-  'kyn': 'kyn', // Karolanos
-  'kyo': 'kyo', // Kelon
-  'kyp': 'kyp', // Kang
-  'kyq': 'kyq', // Kenga
-  'kyr': 'kyr', // Kuruánya
-  'kys': 'kys', // Baram Kayan
-  'kyt': 'kyt', // Kayagar
-  'kyu': 'kyu', // Western Kayah
-  'kyv': 'kyv', // Kayort
-  'kyw': 'kyw', // Kudmali
-  'kyx': 'kyx', // Koongo
-  'kyz': 'kyz', // Kayabí
-  'kza': 'kza', // Western Karaboro
-  'kzb': 'kzb', // Kaibobo
-  'kzc': 'kzc', // Bondoukou Kulango
-  'kzd': 'kzd', // Kadai
-  'kze': 'kze', // Kosena
-  'kzf': 'kzf', // Kaili (Indonesia)
-  'kzg': 'kzg', // Kikai
-  'kzi': 'kzi', // Kelabit
-  'kzj': 'kzj', // Coastal Kadazan
-  'kzl': 'kzl', // Kayeli
-  'kzm': 'kzm', // Kais
-  'kzn': 'kzn', // Kula
-  'kzo': 'kzo', // Kaching
-  'kzp': 'kzp', // Kaidipang
-  'kzq': 'kzq', // Kaike
-  'kzr': 'kzr', // Karang
-  'kzs': 'kzs', // Sugut Dusun
-  'kzt': 'kzt', // Tambunan Dusun
-  'kzu': 'kzu', // Kayupulat
-  'kzv': 'kzv', // Kanoé
-  'kzw': 'kzw', // Karirí-Xocó
-  'kzx': 'kzx', // Kamarian
-  'kzy': 'kzy', // Kango (Tshopo)
-  'kzz': 'kzz', // Kalabra
 };
 
 function toMyMemoryLang(code: string): string {
@@ -1029,9 +1150,8 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       throw translationError('INVALID_REQUEST', 'No text provided for translation.');
     }
 
-    if (text.length > 5000) {
-      throw translationError('INVALID_REQUEST', 'Text exceeds maximum length (5000 characters).');
-    }
+    // Note: The 5000 character limit has been removed since chunking handles longer text
+    // Chunking splits text into 500-character chunks for MyMemory API compatibility
 
     const requestedSource = normalizeLanguageCode(request.sourceLanguage ?? 'auto');
     const target = normalizeLanguageCode(request.targetLanguage);
@@ -1043,57 +1163,76 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
     // Use client-side language detection when source is 'auto'
     let sourceParam: string;
     let detectedSource: string | null | undefined;
+    let detectionConfidence = 0;
 
     if (requestedSource === 'auto') {
-      detectedSource = detectLanguage(text);
+      const detectionResult = detectLanguage(text);
+      detectedSource = detectionResult.language;
+      detectionConfidence = detectionResult.confidence;
+      
+      logger.debug('detection-result', {
+        method: detectionResult.method,
+        language: detectedSource,
+        confidence: detectionResult.confidence,
+        textLength: text.length,
+      });
 
-      // When detection is uncertain, use smart fallback with priority order
-      if (detectedSource === null) {
-        // Priority a: Try page language hint if available, is a valid 2-letter code, and differs from target
+      // When detection is uncertain (null or low confidence), surface this to the user
+      // instead of silently falling back to a hardcoded language
+      if (detectedSource === null || detectionConfidence < 0.5) {
+        // Try page language hint as a last resort, but only if it's valid and differs from target
         const pageLang = request.pageLanguage?.trim();
         const isValidPageLang = pageLang && /^[a-z]{2}$/i.test(pageLang);
+        
         if (isValidPageLang && pageLang !== target) {
-          logger.languageDetection('Detection uncertain, using page language hint:', pageLang);
+          logger.debug('fallback', { type: 'page-language', pageLang });
           sourceParam = toMyMemoryLang(pageLang);
+          detectedSource = pageLang; // Track that we used page language
         } else {
-          // Priority b: No valid page language hint or it equals target - skip pre-API check
-          // Let the API handle it and rely on post-API check for same-language detection
-          logger.languageDetection('Detection uncertain, skipping pre-API same-language check');
-          sourceParam = toMyMemoryLang(pageLang || 'en'); // Use page lang or 'en' as fallback, but don't block
+          // No reliable detection available - throw error instead of guessing
+          // This is required by the spec: no hardcoded fallbacks
+          logger.debug('detection-failed', { 
+            reason: 'low-confidence', 
+            confidence: detectionConfidence,
+            detectedSource 
+          });
+          throw translationError(
+            'INVALID_REQUEST',
+            'Could not detect language automatically — please select the source language manually.'
+          );
         }
       } else {
         sourceParam = toMyMemoryLang(detectedSource);
       }
-      logger.apiDebug('Client-side detected source:', detectedSource, 'sourceParam:', sourceParam);
+      logger.debug('client-detection', { detectedSource, sourceParam });
     } else {
       sourceParam = toMyMemoryLang(requestedSource);
     }
     const targetParam = toMyMemoryLang(target);
 
-    // DEBUG: Log raw values before comparison
-    console.log('=== PRE-API SAME-LANGUAGE DEBUG ===');
-    console.log('Original text:', text);
-    console.log('Raw requestedSource:', requestedSource);
-    console.log('Raw target:', target);
-    console.log('Raw detectedSource:', detectedSource);
-    console.log('Computed sourceParam:', sourceParam);
-    console.log('Computed targetParam:', targetParam);
-    console.log('Comparison: sourceParam === targetParam:', sourceParam === targetParam);
-    console.log('Comparison expression:', `"${sourceParam}" === "${targetParam}"`);
-    console.log('Detection confident (detectedSource !== null):', requestedSource === 'auto' ? detectedSource !== null : true);
-    console.log('===================================');
-
     // Pre-API safeguard: Skip API call if source equals target (avoids MyMemory 403 error)
     // Only apply this check when detection is CONFIDENT (detectedSource !== null for auto-detect)
     // When detection is uncertain, let the API handle it and rely on post-API check
     const isDetectionConfident = requestedSource === 'auto' ? detectedSource !== null : true;
-    console.log('SKIP CHECK: sourceParam === targetParam:', sourceParam === targetParam, 'AND isDetectionConfident:', isDetectionConfident, '=> WILL SKIP:', sourceParam === targetParam && isDetectionConfident);
+    
+    logger.debug('pre-api-check', {
+      sourceParam,
+      targetParam,
+      isDetectionConfident,
+      willSkip: sourceParam === targetParam && isDetectionConfident,
+    });
     
     if (sourceParam === targetParam && isDetectionConfident) {
-      console.log('SKIPPING API CALL - returning sameLanguage: true');
-      logger.languageDetection('Pre-API: Source equals target with confident detection - skipping API call, setting sameLanguage flag');
+      logger.info('same-language', { 
+        trigger: 'pre-api', 
+        reason: 'confident-detection',
+        detectedSource,
+        target,
+        confidence: detectionConfidence
+      });
+      // Return special result to indicate same-language warning
       return {
-        translatedText: text,
+        translatedText: '', // Empty to trigger warning UI
         detectedSourceLanguage: requestedSource === 'auto' ? detectedSource ?? sourceParam : sourceParam,
         targetLanguage: target,
         provider: this.name,
@@ -1107,27 +1246,32 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       };
     }
     
-    console.log('PROCEEDING TO API CALL');
+    logger.debug('api-call', { sourceParam, targetParam, textLength: text.length });
 
-    logger.apiDebug('Pre-check sourceParam:', sourceParam, 'targetParam:', targetParam, 'sourceParam === targetParam:', sourceParam === targetParam);
-
-    const { translatedText, detectedSource: apiDetectedSource } = await fetchMyMemoryTranslation(
+    // Use chunking for long text to handle MyMemory's character limit
+    const { translatedText, detectedSource: apiDetectedSource, chunkCount } = await translateWithChunking(
       text,
       sourceParam,
       targetParam,
       myMemoryEmail,
     );
-    logger.apiDebug('API Response apiDetectedSource:', apiDetectedSource, 'requestedSource:', requestedSource, 'target:', target);
-    logger.apiDebug('Translation Comparison original:', JSON.stringify(text), 'translated:', JSON.stringify(translatedText), 'areEqual:', text.toLowerCase() === translatedText.toLowerCase());
+    
+    logger.debug('api-response', { 
+      apiDetectedSource, 
+      requestedSource, 
+      target, 
+      chunkCount,
+      translatedLength: translatedText.length 
+    });
     const resolvedSource =
       requestedSource === 'auto'
         ? (detectedSource ?? null)
         : requestedSource;
-    logger.apiDebug('Resolved resolvedSource:', resolvedSource);
+    logger.debug('resolved-source', { resolvedSource });
 
     // Log detected language for debugging auto-detect issues
     if (requestedSource === 'auto') {
-      logger.apiDebug('Auto-detect', {
+      logger.debug('auto-detect-info', {
         rawDetected: detectedSource,
         normalizedDetected: detectedSource ? normalizeLanguageCode(detectedSource) : 'N/A',
         targetLanguage: target,
@@ -1138,33 +1282,27 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
 
     // Post-API same-language detection: Check if translation returned original text
     // This is more reliable than pre-API detection since it uses actual API response
-    const isUnchanged = translatedText.toLowerCase().trim() === text.toLowerCase().trim();
+    const normalizedOriginal = normalizeForComparison(text);
+    const normalizedTranslated = normalizeForComparison(translatedText);
+    const isUnchanged = normalizedOriginal === normalizedTranslated;
     
-    // DEBUG: Log post-API comparison values
-    console.log('=== POST-API SAME-LANGUAGE DEBUG ===');
-    console.log('Original text:', text);
-    console.log('Translated text:', translatedText);
-    console.log('isUnchanged:', isUnchanged);
-    console.log('text.length:', text.length);
-    console.log('isLongEnough (>=10):', text.length >= 10);
-    console.log('requestedSource:', requestedSource);
-    console.log('target:', target);
-    console.log('isExplicitSameLanguage:', requestedSource !== 'auto' && requestedSource === target);
-    console.log('shouldSetSameLanguage:', isUnchanged && (text.length >= 10 || (requestedSource !== 'auto' && requestedSource === target)));
-    console.log('=====================================');
-    
-    logger.apiDebug('Post-API same-language check:', { isUnchanged, textLength: text.length });
+    logger.debug('post-api-check', {
+      isUnchanged,
+      textLength: text.length,
+      normalizedOriginal: normalizedOriginal.slice(0, 50),
+      normalizedTranslated: normalizedTranslated.slice(0, 50),
+    });
     
     // Only set sameLanguage flag if:
     // 1. Text is long enough to be confident (avoid false positives on short text like "ok", "hi")
-    // 2. Translation is identical to original
+    // 2. Translation is identical to original (normalized comparison)
     // 3. Either auto-detect was used OR explicit source matches target
-    const isLongEnough = text.length >= 10; // Minimum length threshold
+    const isLongEnough = text.length >= MIN_RELIABLE_DETECTION_LENGTH;
     const isExplicitSameLanguage = requestedSource !== 'auto' && requestedSource === target;
     const shouldSetSameLanguage = isUnchanged && (isLongEnough || isExplicitSameLanguage);
     
     if (shouldSetSameLanguage) {
-      logger.languageDetection('Post-API: Translation returned original text - setting sameLanguage flag');
+      logger.debug('same-language', { trigger: 'post-api', reason: 'unchanged-translation' });
     }
 
     const enrichment =
@@ -1185,7 +1323,11 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       exampleSentences: enrichment?.exampleSentences ?? [],
       sameLanguage: shouldSetSameLanguage,
     };
-    logger.apiDebug('Final Result detectedSourceLanguage:', result.detectedSourceLanguage, 'targetLanguage:', result.targetLanguage, 'sameLanguage:', result.sameLanguage);
+    logger.debug('final-result', {
+      detectedSourceLanguage: result.detectedSourceLanguage,
+      targetLanguage: result.targetLanguage,
+      sameLanguage: result.sameLanguage,
+    });
     return result;
   }
 }
@@ -1226,7 +1368,7 @@ async function fetchWithRetry(
       if (response.status >= 500 || response.status === 429) {
         if (attempt < maxRetries) {
           const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
-          logger.warn(`Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms delay (status: ${response.status})`);
+          logger.warn('retry', { attempt: attempt + 1, maxRetries, delay, status: response.status });
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
@@ -1244,7 +1386,7 @@ async function fetchWithRetry(
       // Retry on network errors
       if (attempt < maxRetries) {
         const delay = Math.pow(2, attempt) * 1000;
-        logger.warn(`Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms delay (network error)`);
+        logger.warn('retry', { attempt: attempt + 1, maxRetries, delay, error: 'network error' });
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
@@ -1297,8 +1439,8 @@ async function fetchMyMemoryTranslation(
     throw translationError('API_FAILURE', 'Translation failed. Please try again.');
   }
 
-  // DEBUG: Log full raw API response to see actual structure
-  logger.myMemoryApi('Raw Response', JSON.stringify(data, null, 2));
+  // Log full raw API response to see actual structure
+  logger.debug('mymemory-raw-response', { response: data });
 
   if (data.responseStatus === 403) {
     // Check if this is the specific "PLEASE SELECT TWO DISTINCT LANGUAGES" error

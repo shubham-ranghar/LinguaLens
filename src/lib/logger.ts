@@ -1,12 +1,71 @@
 /**
- * Logger utility that strips debug logs in production builds.
+ * Logger utility with structured logging and debug flag gating.
  * 
  * In development: All logs are output to console
- * In production: Only error and warn logs are output
+ * In production: Only error and warn logs are output unless debug mode is enabled
  * Safe for use even when extension context is invalidated
  */
 
 const IS_DEV = import.meta.env.MODE === 'development';
+const MAX_LOG_BUFFER_SIZE = 50;
+
+interface LogEntry {
+  timestamp: number;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  category: string;
+  data: Record<string, unknown>;
+}
+
+// In-memory log buffer for debugging
+const logBuffer: LogEntry[] = [];
+
+/**
+ * Check if debug mode is enabled via chrome.storage
+ */
+async function isDebugEnabled(): Promise<boolean> {
+  if (IS_DEV) return true;
+  
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      const result = await chrome.storage.local.get('debugMode');
+      return result.debugMode === true;
+    }
+  } catch {
+    // If storage is unavailable, default to false in production
+  }
+  return false;
+}
+
+/**
+ * Add entry to in-memory log buffer
+ */
+function addToBuffer(entry: LogEntry): void {
+  logBuffer.push(entry);
+  if (logBuffer.length > MAX_LOG_BUFFER_SIZE) {
+    logBuffer.shift(); // Remove oldest entry
+  }
+}
+
+/**
+ * Get the current log buffer
+ */
+export function getLogBuffer(): LogEntry[] {
+  return [...logBuffer];
+}
+
+/**
+ * Clear the log buffer
+ */
+export function clearLogBuffer(): void {
+  logBuffer.length = 0;
+}
+
+/**
+ * Export logs as JSON string for debugging
+ */
+export function exportLogs(): string {
+  return JSON.stringify(logBuffer, null, 2);
+}
 
 /**
  * Safe logging function that works even when extension context is invalidated
@@ -29,54 +88,118 @@ function safeLog(level: 'log' | 'info' | 'warn' | 'error', ...args: unknown[]) {
 }
 
 export const logger = {
-  debug: (...args: unknown[]) => {
-    if (IS_DEV) {
-      safeLog('log', '[DEBUG]', ...args);
-    }
+  /**
+   * Structured debug log with category and data
+   */
+  debug: (category: string, data: Record<string, unknown>) => {
+    const entry: LogEntry = {
+      timestamp: Date.now(),
+      level: 'debug',
+      category,
+      data,
+    };
+    addToBuffer(entry);
+    
+    // Check debug mode asynchronously (non-blocking)
+    void isDebugEnabled().then(enabled => {
+      if (enabled || IS_DEV) {
+        safeLog('log', `[DEBUG][${category}]`, data);
+      }
+    });
   },
   
-  info: (...args: unknown[]) => {
-    if (IS_DEV) {
-      safeLog('info', '[INFO]', ...args);
-    }
+  /**
+   * Structured info log with category and data
+   */
+  info: (category: string, data: Record<string, unknown>) => {
+    const entry: LogEntry = {
+      timestamp: Date.now(),
+      level: 'info',
+      category,
+      data,
+    };
+    addToBuffer(entry);
+    
+    void isDebugEnabled().then(enabled => {
+      if (enabled || IS_DEV) {
+        safeLog('info', `[INFO][${category}]`, data);
+      }
+    });
   },
   
-  warn: (...args: unknown[]) => {
-    safeLog('warn', '[WARN]', ...args);
+  /**
+   * Structured warn log with category and data (always logged)
+   */
+  warn: (category: string, data: Record<string, unknown>) => {
+    const entry: LogEntry = {
+      timestamp: Date.now(),
+      level: 'warn',
+      category,
+      data,
+    };
+    addToBuffer(entry);
+    safeLog('warn', `[WARN][${category}]`, data);
   },
   
-  error: (...args: unknown[]) => {
-    safeLog('error', '[ERROR]', ...args);
+  /**
+   * Structured error log with category and data (always logged)
+   */
+  error: (category: string, data: Record<string, unknown>) => {
+    const entry: LogEntry = {
+      timestamp: Date.now(),
+      level: 'error',
+      category,
+      data,
+    };
+    addToBuffer(entry);
+    safeLog('error', `[ERROR][${category}]`, data);
   },
   
-  // Convenience method for language detection debugging
+  // Legacy convenience methods for backward compatibility
   languageDetection: (...args: unknown[]) => {
-    if (IS_DEV) {
-      safeLog('log', '[Language Detection]', ...args);
-    }
+    logger.debug('language-detection', {
+      message: args.length > 0 ? String(args[0]) : '',
+      details: args.slice(1),
+    });
   },
   
-  // Convenience method for API debugging
   apiDebug: (...args: unknown[]) => {
-    if (IS_DEV) {
-      safeLog('log', '[API Debug]', ...args);
-    }
+    logger.debug('api', {
+      message: args.length > 0 ? String(args[0]) : '',
+      details: args.slice(1),
+    });
   },
   
-  // Convenience method for MyMemory API debugging
   myMemoryApi: (...args: unknown[]) => {
-    if (IS_DEV) {
-      safeLog('log', '[MyMemory API]', ...args);
-    }
+    logger.debug('mymemory-api', {
+      message: args.length > 0 ? String(args[0]) : '',
+      details: args.slice(1),
+    });
   },
   
-  // Convenience method for Gemini API debugging
   geminiApi: (...args: unknown[]) => {
-    if (IS_DEV) {
-      safeLog('log', '[Gemini API]', ...args);
-    }
+    logger.debug('gemini-api', {
+      message: args.length > 0 ? String(args[0]) : '',
+      details: args.slice(1),
+    });
   },
 };
+
+/**
+ * Toggle debug mode in chrome.storage
+ */
+export async function setDebugMode(enabled: boolean): Promise<void> {
+  if (typeof chrome !== 'undefined' && chrome.storage) {
+    await chrome.storage.local.set({ debugMode: enabled });
+  }
+}
+
+/**
+ * Get current debug mode status
+ */
+export async function getDebugMode(): Promise<boolean> {
+  return isDebugEnabled();
+}
 
 /**
  * Check if extension context is valid

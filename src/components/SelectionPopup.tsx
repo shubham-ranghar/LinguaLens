@@ -395,6 +395,7 @@ export function SelectionPopup({
       <div
         style={style}
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
         className="ll-selection-popup__shell ll-animate-fade-in-scale"
       >
         <div className="ll-selection-popup">
@@ -423,13 +424,16 @@ export function SelectionPopup({
               </div>
             )}
 
-            <p className="ll-selection-popup__source">{selectedText}</p>
+            <p className="ll-selection-popup__source" aria-live="polite">{selectedText}</p>
 
             <div className="ll-selection-popup__langs">
               <Select
                 label={t('sourceLanguage')}
                 value={sourceLang}
-                onChange={(e) => setSourceLang(e.target.value)}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  setSourceLang(e.target.value);
+                }}
               >
                 {SUPPORTED_LANGUAGES.map((lang) => (
                   <option key={lang.code} value={lang.code}>
@@ -440,7 +444,10 @@ export function SelectionPopup({
               <Select
                 label={t('targetLanguage')}
                 value={targetLang}
-                onChange={(e) => setTargetLang(e.target.value)}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  setTargetLang(e.target.value);
+                }}
               >
                 {SUPPORTED_LANGUAGES.filter((l) => l.code !== 'auto').map((lang) => (
                   <option key={lang.code} value={lang.code}>
@@ -461,7 +468,10 @@ export function SelectionPopup({
                 variant="primary"
                 className="ll-selection-popup__cta"
                 disabled={isSameLanguage || isTranslateBusy}
-                onClick={() => void runTranslation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void runTranslation();
+                }}
               >
                 {t('translate')}
               </Button>
@@ -487,7 +497,10 @@ export function SelectionPopup({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setView({ status: 'idle' })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setView({ status: 'idle' });
+                  }}
                 >
                   Back to translation
                 </Button>
@@ -496,7 +509,7 @@ export function SelectionPopup({
 
             {view.status === 'ai-success' && (
               <div className="ll-selection-popup__panel space-y-2">
-                <p className="ll-selection-popup__translation">{view.aiResult}</p>
+                <p className="ll-selection-popup__translation" aria-live="polite">{view.aiResult}</p>
                 {view.aiOperation === 'grammar' && view.grammarChanges && view.grammarChanges.length > 0 && (
                   <div className="ll-selection-popup__dictionary">
                     <p className="ll-selection-popup__dictionary-pos">Changes</p>
@@ -510,7 +523,10 @@ export function SelectionPopup({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setView({ status: 'idle' })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setView({ status: 'idle' });
+                  }}
                 >
                   Back to translation
                 </Button>
@@ -522,16 +538,26 @@ export function SelectionPopup({
                 {view.result.sameLanguage ? (
                   <>
                     <div className="ll-banner ll-banner--warning ll-selection-popup__banner" role="status">
-                      Detected language is the same as your target language. Try selecting a different target language.
+                      <span className="mr-1.5" aria-hidden="true">⚠️</span>
+                      Detected language is the same as your target language — no translation needed.
                     </div>
-                    <p className="ll-selection-popup__translation">{selectedText}</p>
                     <p className="ll-selection-popup__meta">
-                      {getLanguageLabel(view.result.detectedSourceLanguage ?? 'Unknown')}
+                      Detected: {getLanguageLabel(view.result.detectedSourceLanguage ?? 'Unknown')}
                     </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setView({ status: 'idle' });
+                      }}
+                    >
+                      Try a different target language
+                    </Button>
                   </>
                 ) : (
                   <>
-                    <p className="ll-selection-popup__translation">{view.result.translatedText}</p>
+                    <p className="ll-selection-popup__translation" aria-live="polite">{view.result.translatedText}</p>
                     <DictionaryDetails result={view.result} />
                     <p className="ll-selection-popup__meta">
                       {(() => {
@@ -560,7 +586,8 @@ export function SelectionPopup({
                 variant="ghost"
                 size="sm"
                 disabled={view.status !== 'success'}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   if (view.status === 'success') {
                     speakText(view.result.translatedText, view.result.targetLanguage);
                   }
@@ -573,7 +600,10 @@ export function SelectionPopup({
                 variant="ghost"
                 size="sm"
                 disabled={view.status !== 'success' || savedToVocab}
-                onClick={() => void handleSaveToVocabulary()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleSaveToVocabulary();
+                }}
                 aria-label="Save to vocabulary"
               >
                 <span className={savedToVocab ? 'll-animate-fade-in' : ''}>{savedToVocab ? '✓ Saved' : `📚 ${t('saveToVocabulary')}`}</span>
@@ -651,7 +681,10 @@ export function FloatingTrigger({ position, onClick }: FloatingTriggerProps) {
     <button
       type="button"
       style={style}
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
       className="ll-floating-trigger ll-focus-ring ll-animate-scale-in"
       title="Translate with LinguaLens"
       aria-label="Translate selection"

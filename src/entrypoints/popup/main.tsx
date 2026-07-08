@@ -8,10 +8,10 @@ import type { Theme } from '@/types';
 import '@/assets/tailwind.css';
 
 async function initPopup() {
-  logger.debug('Initializing popup...');
+  logger.debug('popup', { action: 'initializing' });
   const root = document.getElementById('root');
   if (!root) {
-    logger.error('Root element not found');
+    logger.error('popup', { action: 'no-root-element' });
     return;
   }
 
@@ -20,14 +20,14 @@ async function initPopup() {
 
   try {
     // Apply theme before first paint to avoid flash
-    logger.debug('Loading settings...');
+    logger.debug('popup', { action: 'loading-settings' });
     const settings = await getSettings();
-    logger.debug('Settings loaded:', settings);
+    logger.debug('popup', { action: 'settings-loaded', settings });
     const initialTheme = settings.theme;
     currentTheme = initialTheme;
     cleanupThemeWatcher = initTheme(root, () => currentTheme);
   } catch (err) {
-    logger.error('Failed to load settings:', err);
+    logger.error('popup', { action: 'settings-load-failed', error: err instanceof Error ? err.message : String(err) });
     // Continue with default theme even if settings fail
     cleanupThemeWatcher = initTheme(root, () => 'system');
   }
@@ -44,13 +44,13 @@ async function initPopup() {
   };
   chrome.storage.onChanged.addListener(handleStorageChange);
 
-  logger.debug('Rendering React app...');
+  logger.debug('popup', { action: 'rendering-react' });
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <PopupApp initialTheme={currentTheme} />
     </React.StrictMode>,
   );
-  logger.debug('React app rendered');
+  logger.debug('popup', { action: 'react-rendered' });
 
   // Cleanup on unmount
   window.addEventListener('unload', () => {

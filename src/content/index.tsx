@@ -19,7 +19,6 @@ export function initContentScript(ctx: ContentScriptContext): void {
   let uiState: UiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
   let reactRoot: Root | null = null;
   let shadowUi: Awaited<ReturnType<typeof createShadowRootUi>> | null = null;
-  let ignoreSelectionChange = false;
   let cleanupThemeWatcher: (() => void) | null = null;
   let debounceTimer: number | null = null;
   let mutationObserver: MutationObserver | null = null;
@@ -29,14 +28,14 @@ export function initContentScript(ctx: ContentScriptContext): void {
   let isContextValid = true;
 
   // Log when content script loads
-  logger.debug('LinguaLens content script loaded on:', window.location.href);
+  logger.debug('content-script', { action: 'loaded', url: window.location.href });
 
   // ============================================
   // CONTEXT INVALIDATION HANDLING
   // ============================================
   
   function handleContextInvalidation(): void {
-    logger.warn('Extension context invalidated, cleaning up...');
+    logger.warn('content-script', { action: 'context-invalidated' });
     isContextValid = false;
     
     // Clean up all resources
@@ -69,23 +68,23 @@ export function initContentScript(ctx: ContentScriptContext): void {
     shadowRoots.clear();
     
     // Hide any remaining UI
-    logger.debug('HIDE PATH: Context invalidation cleanup');
+    logger.debug('content-script', { action: 'hide-ui-cleanup' });
     uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
     
-    logger.warn('Context invalidation cleanup complete');
+    logger.warn('content-script', { action: 'context-invalidation-cleanup-complete' });
   }
 
   // Listen for context invalidation
   if (typeof chrome !== 'undefined' && chrome.runtime) {
     chrome.runtime.onSuspend?.addListener?.(() => {
-      logger.warn('Extension suspend detected');
+      logger.warn('content-script', { action: 'extension-suspend-detected' });
       handleContextInvalidation();
     });
   }
 
   async function loadSettings(): Promise<UserSettings> {
     if (!isContextValid) {
-      logger.warn('Cannot load settings: extension context invalid');
+      logger.warn('content-script', { action: 'settings-load-failed-context-invalid' });
       throw new Error('Extension context invalidated');
     }
     const response = await fetchSettings();
@@ -105,89 +104,140 @@ export function initContentScript(ctx: ContentScriptContext): void {
   function isEventInsideExtensionUi(event: Event): boolean {
     const container = shadowUi?.uiContainer;
     const host = getExtensionShadowHost();
-    if (!container && !host) return false;
+    if (!container && !host) {
+      logger.debug('content-script', { action: 'isEventInsideExtensionUi-false', reason: 'no-container-or-host' });
+      return false;
+    }
 
     const path = event.composedPath();
-    if (host && path.includes(host)) return true;
-    if (container && path.includes(container)) return true;
+    const hostInPath = host && path.includes(host);
+    const containerInPath = container && path.includes(container);
+    
+    logger.debug('content-script', { 
+      action: 'isEventInsideExtensionUi-check', 
+      hasHost: !!host,
+      hasContainer: !!container,
+      hostInPath,
+      containerInPath,
+      pathLength: path.length,
+      eventType: event.type,
+      uiStateMode: uiState.mode
+    });
+    
+    if (hostInPath) return true;
+    if (containerInPath) return true;
     return false;
   }
 
   function getTriggerPosition(rect: DOMRect): { top: number; left: number } {
+    // Account for scroll position
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+    
+    // Account for zoom level
+    const zoomLevel = window.devicePixelRatio || 1;
+    const adjustedRect = {
+      top: rect.top / zoomLevel,
+      right: rect.right / zoomLevel,
+      left: rect.left / zoomLevel,
+      bottom: rect.bottom / zoomLevel,
+    };
+    
     return {
-      top: Math.max(8, rect.top - 44),
-      left: Math.min(rect.right + 4, window.innerWidth - 44),
+      top: Math.max(8, adjustedRect.top + scrollTop - 44),
+      left: Math.min(adjustedRect.right + scrollLeft + 4, window.innerWidth - 44),
     };
   }
 
   function getPopupPosition(rect: DOMRect): { top: number; left: number } {
+    const popupWidth = 360;
     const popupHeight = 320;
-    const spaceBelow = window.innerHeight - rect.bottom - 8;
-    const spaceAbove = rect.top - 8;
+    
+    // Account for scroll position
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+    
+    // Account for zoom level
+    const zoomLevel = window.devicePixelRatio || 1;
+    const adjustedRect = {
+      top: rect.top / zoomLevel,
+      right: rect.right / zoomLevel,
+      left: rect.left / zoomLevel,
+      bottom: rect.bottom / zoomLevel,
+    };
+    
+    const spaceBelow = window.innerHeight - adjustedRect.bottom - 8;
+    const spaceAbove = adjustedRect.top - 8;
     
     // If there's not enough space below but enough above, position above the selection
     let top;
     if (spaceBelow < popupHeight && spaceAbove > popupHeight) {
-      top = Math.max(8, rect.top - popupHeight - 8);
+      top = Math.max(8, adjustedRect.top + scrollTop - popupHeight - 8);
     } else {
-      top = Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - popupHeight - 8));
+      top = Math.max(8, Math.min(adjustedRect.bottom + scrollTop + 8, window.innerHeight + scrollTop - popupHeight - 8));
     }
     
-    return {
-      top,
-      left: Math.min(Math.max(rect.left, 8), window.innerWidth - 360),
-    };
+    // Ensure popup doesn't overflow horizontally
+    let left = adjustedRect.left + scrollLeft;
+    if (left + popupWidth > window.innerWidth + scrollLeft) {
+      left = window.innerWidth + scrollLeft - popupWidth - 8;
+    }
+    if (left < scrollLeft + 8) {
+      left = scrollLeft + 8;
+    }
+    
+    return { top, left };
   }
 
   function renderUi(): void {
     if (!reactRoot || !settings) {
-      logger.debug('renderUi: Cannot render - reactRoot or settings missing', { hasReactRoot: !!reactRoot, hasSettings: !!settings });
+      logger.debug('content-script', { action: 'render-failed-missing-dependencies', hasReactRoot: !!reactRoot, hasSettings: !!settings });
       return;
     }
 
     const { mode, text, position } = uiState;
 
-    logger.debug('renderUi called with mode:', mode, 'text length:', text.length, 'position:', position);
+    logger.debug('content-script', { action: 'render-ui', mode, textLength: text.length, position });
 
     if (mode === 'hidden') {
-      logger.debug('renderUi: Rendering null (hidden mode)');
+      logger.debug('content-script', { 
+        action: 'render-hidden', 
+        stackTrace: new Error().stack,
+        uiStateBefore: uiState
+      });
       reactRoot.render(null);
       return;
     }
 
     if (mode === 'trigger') {
-      logger.debug('renderUi: Rendering FloatingTrigger');
+      logger.debug('content-script', { action: 'render-trigger' });
       reactRoot.render(
         <FloatingTrigger
           position={position}
           onClick={() => {
-            logger.debug('FloatingTrigger clicked, switching to popup mode');
-            ignoreSelectionChange = true;
+            logger.debug('content-script', { action: 'trigger-clicked' });
             const rect = getSelectionRect();
             uiState = {
               ...uiState,
               mode: 'popup',
               position: rect ? getPopupPosition(rect) : uiState.position,
             };
-            logger.debug('New UI state:', uiState);
+            logger.debug('content-script', { action: 'ui-state-updated', uiState });
             renderUi();
-            window.setTimeout(() => {
-              ignoreSelectionChange = false;
-            }, 100);
           }}
         />,
       );
       return;
     }
 
-    logger.debug('renderUi: Rendering SelectionPopup with text:', text.substring(0, 50));
+    logger.debug('content-script', { action: 'render-popup', textPreview: text.substring(0, 50) });
     reactRoot.render(
       <SelectionPopup
         selectedText={text}
         position={position}
         settings={settings}
         onClose={() => {
-          logger.debug('SelectionPopup onClose called');
+          logger.debug('content-script', { action: 'popup-close' });
           uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
           renderUi();
         }}
@@ -242,6 +292,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
 
   // Debounced selection handler for performance
   function debouncedHandleSelectionChange(): void {
+    if (uiState.mode === 'popup') return; // Don't handle selection changes while popup is open
     if (debounceTimer) {
       window.clearTimeout(debounceTimer);
     }
@@ -252,19 +303,27 @@ export function initContentScript(ctx: ContentScriptContext): void {
   }
 
   async function handleSelectionChange(): Promise<void> {
-    if (ignoreSelectionChange) return;
+    if (uiState.mode === 'popup') return; // Don't handle selection changes while popup is open
     if (!isContextValid) {
-      logger.warn('Selection change ignored: context invalid');
+      logger.warn('content-script', { action: 'selection-ignored-context-invalid' });
       return;
     }
 
     const text = getSelectedText();
     const rect = getSelectionRect();
 
-    logger.debug('Selection changed:', { text, hasRect: !!rect, url: window.location.href });
+    logger.debug('content-script', { action: 'selection-changed', text, hasRect: !!rect, url: window.location.href });
 
     if (!text || !rect) {
       if (uiState.mode !== 'hidden') {
+        logger.debug('content-script', { 
+          action: 'handleSelectionChange-hiding-popup', 
+          reason: 'no-text-or-rect',
+          hasText: !!text,
+          hasRect: !!rect,
+          currentMode: uiState.mode,
+          stackTrace: new Error().stack
+        });
         uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
         renderUi();
       }
@@ -288,7 +347,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
       position:
         behavior === 'auto-show' ? getPopupPosition(rect) : getTriggerPosition(rect),
     };
-    logger.debug('UI state updated:', uiState);
+    logger.debug('content-script', { action: 'ui-state-updated', uiState });
     renderUi();
   }
 
@@ -315,62 +374,59 @@ export function initContentScript(ctx: ContentScriptContext): void {
   // Use capture phase for better event interception
   document.addEventListener('mouseup', (e) => {
     if (isEventInsideExtensionUi(e)) return;
-    if (!ignoreSelectionChange) {
-      debouncedHandleSelectionChange();
-    }
+    debouncedHandleSelectionChange();
   }, true);
 
   document.addEventListener('touchend', (e) => {
     if (isEventInsideExtensionUi(e)) return;
-    if (!ignoreSelectionChange) {
-      debouncedHandleSelectionChange();
-    }
+    debouncedHandleSelectionChange();
   }, true);
 
   document.addEventListener('keyup', (e) => {
     if (isEventInsideExtensionUi(e)) return;
-    if (!ignoreSelectionChange) {
-      debouncedHandleSelectionChange();
-    }
+    debouncedHandleSelectionChange();
   }, true);
 
   document.addEventListener('selectionchange', () => {
-    if (ignoreSelectionChange) return;
-    // Opening <select> and other popup controls clears page selection — don't close.
+    logger.debug('content-script', { 
+      action: 'selectionchange-event', 
+      currentMode: uiState.mode,
+      selectedText: getSelectedText()
+    });
+    // Don't close popup on selectionchange while it's open - this allows dropdowns to work
     if (uiState.mode === 'popup') return;
 
     const text = getSelectedText();
     if (!text && uiState.mode !== 'hidden') {
+      logger.debug('content-script', { 
+        action: 'selectionchange-hiding-popup', 
+        stackTrace: new Error().stack
+      });
       uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
       renderUi();
     }
   }, true);
 
-  // Additional handling for SPAs like Instagram that might not trigger normal events
+  // Single outside-click handler - only closes if click is genuinely outside the popup
   document.addEventListener('mousedown', (e) => {
+    logger.debug('content-script', { 
+      action: 'mousedown-event', 
+      isInsideUi: isEventInsideExtensionUi(e),
+      currentMode: uiState.mode,
+      selectedText: getSelectedText()
+    });
     if (isEventInsideExtensionUi(e)) return;
-    // Clear UI when clicking outside, but with a delay to allow screenshot tools to capture
+    // Only close if popup is visible and click is outside
     if (uiState.mode !== 'hidden') {
-      // Check if selection still exists after a short delay
-      // If selection is gone, user intentionally clicked elsewhere - close popup
-      // If selection still exists, likely a screenshot operation - keep popup visible
-      window.setTimeout(() => {
-        const text = getSelectedText();
-        const rect = getSelectionRect();
-        if (!text || !rect) {
-          uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
-          renderUi();
-        }
-      }, 50);
+      uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
+      renderUi();
     }
   }, true);
 
   // Click event as fallback for touch devices
   document.addEventListener('click', (e) => {
     if (isEventInsideExtensionUi(e)) return;
-    if (!ignoreSelectionChange) {
-      debouncedHandleSelectionChange();
-    }
+    debouncedHandleSelectionChange();
   }, true);
 
   // ============================================
@@ -381,14 +437,31 @@ export function initContentScript(ctx: ContentScriptContext): void {
     if (mutationObserver) return;
 
     mutationObserver = new MutationObserver((mutations) => {
-      // Check for URL changes (SPA navigation)
-      if (window.location.href !== lastUrl) {
-        logger.debug('URL changed from', lastUrl, 'to', window.location.href);
-        lastUrl = window.location.href;
-        // Reset UI state on navigation
-        uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
-        renderUi();
-      }
+      // Check for URL changes (SPA navigation) via title changes
+      // Most SPAs update the document title on navigation
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'childList' || mutation.type === 'characterData') {
+          const target = mutation.target;
+          // Check if the mutation is on the title element or its text content
+          const isTitleMutation = 
+            (target instanceof HTMLElement && target.tagName === 'TITLE') ||
+            (target instanceof Text && target.parentElement?.tagName === 'TITLE');
+          
+          if (isTitleMutation) {
+            if (window.location.href !== lastUrl) {
+              logger.debug('content-script', { action: 'url-changed', from: lastUrl, to: window.location.href });
+              lastUrl = window.location.href;
+              // Reset UI state on navigation
+              uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
+              renderUi();
+              // Re-scan for new shadow roots after navigation
+              scanExistingShadowRoots();
+              // Re-scan for new iframes after navigation
+              setupIframeSupport();
+            }
+          }
+        }
+      });
 
       // Check for new Shadow Roots
       mutations.forEach((mutation) => {
@@ -398,28 +471,27 @@ export function initContentScript(ctx: ContentScriptContext): void {
             const allElements = node.querySelectorAll('*');
             allElements.forEach((el) => {
               if (el.shadowRoot && !shadowRoots.has(el.shadowRoot)) {
-                shadowRoots.add(el.shadowRoot);
-                logger.debug('New shadow root detected');
-                // Add event listeners to shadow root
-                el.shadowRoot.addEventListener('mouseup', () => {
-                  if (!ignoreSelectionChange) {
-                    debouncedHandleSelectionChange();
-                  }
-                });
-                el.shadowRoot.addEventListener('touchend', () => {
-                  if (!ignoreSelectionChange) {
-                    debouncedHandleSelectionChange();
-                  }
-                });
-                el.shadowRoot.addEventListener('selectionchange', () => {
-                  if (!ignoreSelectionChange && uiState.mode !== 'popup') {
-                    const text = getSelectedText();
-                    if (!text && uiState.mode !== 'hidden') {
-                      uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
-                      renderUi();
-                    }
-                  }
-                });
+                attachShadowRootListeners(el.shadowRoot);
+              }
+            });
+            // Also check the node itself
+            if (node.shadowRoot && !shadowRoots.has(node.shadowRoot)) {
+              attachShadowRootListeners(node.shadowRoot);
+            }
+          }
+        });
+      });
+
+      // Check for dynamically added iframes
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node instanceof HTMLIFrameElement) {
+            attachIframeListeners(node);
+          } else if (node instanceof HTMLElement) {
+            const iframes = node.querySelectorAll('iframe');
+            iframes.forEach((iframe) => {
+              if (!iframe.hasAttribute('data-ll-handled')) {
+                attachIframeListeners(iframe);
               }
             });
           }
@@ -427,15 +499,133 @@ export function initContentScript(ctx: ContentScriptContext): void {
       });
     });
 
-    // Observe the entire document for changes
-    mutationObserver.observe(document.body, {
+    // Observe document head for title changes (most efficient for SPA detection)
+    const titleElement = document.querySelector('title');
+    if (titleElement) {
+      mutationObserver.observe(titleElement, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    }
+
+    // Also observe head for title element additions/replacements
+    const headElement = document.head;
+    if (headElement) {
+      mutationObserver.observe(headElement, {
+        childList: true,
+        subtree: false,
+      });
+    }
+
+    // Observe body for shadow roots and iframes (but not all DOM changes)
+    if (document.body) {
+      mutationObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: false,
+        characterData: false,
+      });
+    }
+
+    // Watch for document.body replacement (some SPAs replace entire body)
+    const bodyObserver = new MutationObserver(() => {
+      if (document.body && !document.body.hasAttribute('data-ll-observed')) {
+        document.body.setAttribute('data-ll-observed', 'true');
+        if (mutationObserver) {
+          mutationObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: false,
+            characterData: false,
+          });
+        }
+        // Re-scan after body replacement
+        scanExistingShadowRoots();
+        setupIframeSupport();
+      }
+    });
+    bodyObserver.observe(document.documentElement, {
       childList: true,
-      subtree: true,
-      attributes: false,
-      characterData: false,
+      subtree: false,
     });
 
-    logger.debug('MutationObserver set up for SPA navigation detection');
+    logger.debug('content-script', { action: 'mutation-observer-setup' });
+  }
+
+  function attachShadowRootListeners(shadowRoot: ShadowRoot): void {
+    if (shadowRoots.has(shadowRoot)) return;
+    shadowRoots.add(shadowRoot);
+    logger.debug('content-script', { action: 'shadow-root-detected' });
+    
+    shadowRoot.addEventListener('mouseup', () => {
+      if (uiState.mode !== 'popup') {
+        debouncedHandleSelectionChange();
+      }
+    });
+    shadowRoot.addEventListener('touchend', () => {
+      if (uiState.mode !== 'popup') {
+        debouncedHandleSelectionChange();
+      }
+    });
+    shadowRoot.addEventListener('selectionchange', () => {
+      if (uiState.mode !== 'popup') {
+        const text = getSelectedText();
+        if (!text && uiState.mode !== 'hidden') {
+          uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
+          renderUi();
+        }
+      }
+    });
+  }
+
+  function scanExistingShadowRoots(): void {
+    // Optimize: Only check elements that commonly have shadow roots
+    // instead of querying all elements with querySelectorAll('*')
+    const shadowHostSelectors = [
+      'custom-element',
+      '[data-shadow]',
+      'video', // Some video players use shadow DOM
+      'audio', // Some audio players use shadow DOM
+    ];
+    
+    let foundCount = 0;
+    
+    // Check common shadow host selectors first
+    shadowHostSelectors.forEach(selector => {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach((el) => {
+        if (el.shadowRoot && !shadowRoots.has(el.shadowRoot)) {
+          attachShadowRootListeners(el.shadowRoot);
+          foundCount++;
+        }
+      });
+    });
+    
+    // Fallback: only check elements with shadowRoot property (more efficient than querySelectorAll('*'))
+    // This is a tree walker approach that's much more performant
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_ELEMENT,
+      {
+        acceptNode: (node) => {
+          if (node instanceof HTMLElement && node.shadowRoot && !shadowRoots.has(node.shadowRoot)) {
+            return NodeFilter.FILTER_ACCEPT;
+          }
+          return NodeFilter.FILTER_SKIP;
+        }
+      }
+    );
+    
+    let node;
+    while (node = walker.nextNode()) {
+      if (node instanceof HTMLElement && node.shadowRoot) {
+        attachShadowRootListeners(node.shadowRoot);
+        foundCount++;
+      }
+    }
+    
+    logger.debug('content-script', { action: 'shadow-roots-scanned', count: shadowRoots.size, newlyFound: foundCount });
   }
 
   // ============================================
@@ -445,47 +635,70 @@ export function initContentScript(ctx: ContentScriptContext): void {
   function setupPolling(): void {
     if (pollingInterval) return;
     
+    let lastPollText = '';
+    let activityDetected = false;
+    
     pollingInterval = window.setInterval(() => {
       const text = getSelectedText();
       const rect = getSelectionRect();
       
       // Only trigger if we have a selection but no UI showing
       if (text && rect && uiState.mode === 'hidden') {
-        logger.debug('Polling detected selection:', text.substring(0, 30));
+        // Only log if text changed to reduce noise
+        if (text !== lastPollText) {
+          logger.debug('content-script', { action: 'polling-detected-selection', textPreview: text.substring(0, 30) });
+          lastPollText = text;
+          activityDetected = true;
+        }
         void handleSelectionChange();
+      } else if (!text) {
+        lastPollText = '';
+        // Reduce polling frequency when no activity detected
+        if (activityDetected) {
+          activityDetected = false;
+          // Could implement adaptive polling here if needed
+        }
       }
     }, 500); // Check every 500ms
     
-    logger.debug('Polling fallback set up');
+    logger.debug('content-script', { action: 'polling-setup' });
   }
 
   // ============================================
   // IFRAME SUPPORT
   // ============================================
   
+  function attachIframeListeners(iframe: HTMLIFrameElement): void {
+    if (iframe.hasAttribute('data-ll-handled')) return;
+    iframe.setAttribute('data-ll-handled', 'true');
+    
+    try {
+      // Try to access iframe content (same-origin only)
+      if (iframe.contentDocument) {
+        iframe.contentDocument.addEventListener('mouseup', () => {
+          if (uiState.mode !== 'popup') {
+            debouncedHandleSelectionChange();
+          }
+        }, true);
+        iframe.contentDocument.addEventListener('touchend', () => {
+          if (uiState.mode !== 'popup') {
+            debouncedHandleSelectionChange();
+          }
+        }, true);
+        logger.debug('content-script', { action: 'iframe-listeners-added' });
+      }
+    } catch (e) {
+      // Cross-origin iframe - cannot access
+      logger.debug('content-script', { action: 'iframe-cross-origin-blocked' });
+    }
+  }
+
   function setupIframeSupport(): void {
     const iframes = document.querySelectorAll('iframe');
     iframes.forEach((iframe) => {
-      try {
-        // Try to access iframe content (same-origin only)
-        if (iframe.contentDocument) {
-          iframe.contentDocument.addEventListener('mouseup', () => {
-            if (!ignoreSelectionChange) {
-              debouncedHandleSelectionChange();
-            }
-          }, true);
-          iframe.contentDocument.addEventListener('touchend', () => {
-            if (!ignoreSelectionChange) {
-              debouncedHandleSelectionChange();
-            }
-          }, true);
-          logger.debug('Added event listeners to iframe');
-        }
-      } catch (e) {
-        // Cross-origin iframe - cannot access
-        logger.debug('Cannot access cross-origin iframe');
-      }
+      attachIframeListeners(iframe);
     });
+    logger.debug('content-script', { action: 'iframe-support-setup', count: iframes.length });
   }
 
   // ============================================
@@ -517,14 +730,17 @@ export function initContentScript(ctx: ContentScriptContext): void {
   // Load settings
   void loadSettings();
 
+  // Scan for existing shadow roots on initialization
+  scanExistingShadowRoots();
+
   // Set up SPA navigation detection
   setupMutationObserver();
 
-  // Set up polling fallback for problematic sites
-  setupPolling();
-
   // Set up iframe support
   setupIframeSupport();
+
+  // Set up polling fallback for problematic sites
+  setupPolling();
 
   // Force text selection on sites that block it
   // Commented out by default as it may break site functionality
@@ -539,7 +755,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
     originalPushState.apply(history, args);
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
-      logger.debug('URL changed via pushState:', lastUrl);
+      logger.debug('content-script', { action: 'url-changed-pushstate', url: lastUrl });
       uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
       renderUi();
     }
@@ -549,7 +765,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
     originalReplaceState.apply(history, args);
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
-      logger.debug('URL changed via replaceState:', lastUrl);
+      logger.debug('content-script', { action: 'url-changed-replacestate', url: lastUrl });
       uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
       renderUi();
     }
@@ -558,7 +774,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
   window.addEventListener('popstate', () => {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
-      logger.debug('URL changed via popstate:', lastUrl);
+      logger.debug('content-script', { action: 'url-changed-popstate', url: lastUrl });
       uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
       renderUi();
     }
@@ -603,5 +819,5 @@ export function initContentScript(ctx: ContentScriptContext): void {
     }
   });
 
-  logger.debug('LinguaLens content script fully initialized with SPA support');
+  logger.debug('content-script', { action: 'fully-initialized' });
 }

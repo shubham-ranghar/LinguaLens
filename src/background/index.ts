@@ -122,7 +122,8 @@ function handleAiError(error: unknown): BackgroundResponse {
 }
 
 async function handleMessage(message: BackgroundRequest): Promise<BackgroundResponse> {
-  switch (message.type) {
+  try {
+    switch (message.type) {
     case 'PING':
       return { type: 'PONG' };
 
@@ -164,8 +165,7 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
       const maskedKey = settings.geminiApiKey 
         ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
         : 'MISSING';
-      logger.debug('AI_SIMPLIFY - Full settings object:', { ...settings, geminiApiKey: maskedKey });
-      logger.debug('AI_SIMPLIFY - API key length:', settings.geminiApiKey?.length ?? 0);
+      logger.debug('ai-simplify', { settings: { ...settings, geminiApiKey: maskedKey }, apiKeyLength: settings.geminiApiKey?.length ?? 0 });
       try {
         const result = await simplify(message.payload.text, settings.geminiApiKey);
         return { type: 'AI_SIMPLIFY_RESULT', payload: result };
@@ -179,8 +179,7 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
       const maskedKey = settings.geminiApiKey 
         ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
         : 'MISSING';
-      logger.debug('AI_CORRECT_GRAMMAR - Full settings object:', { ...settings, geminiApiKey: maskedKey });
-      logger.debug('AI_CORRECT_GRAMMAR - API key length:', settings.geminiApiKey?.length ?? 0);
+      logger.debug('ai-correct-grammar', { settings: { ...settings, geminiApiKey: maskedKey }, apiKeyLength: settings.geminiApiKey?.length ?? 0 });
       try {
         const result = await correctGrammar(message.payload.text, settings.geminiApiKey);
         return { type: 'AI_CORRECT_GRAMMAR_RESULT', payload: result };
@@ -194,8 +193,7 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
       const maskedKey = settings.geminiApiKey 
         ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
         : 'MISSING';
-      logger.debug('AI_SUMMARIZE - Full settings object:', { ...settings, geminiApiKey: maskedKey });
-      logger.debug('AI_SUMMARIZE - API key length:', settings.geminiApiKey?.length ?? 0);
+      logger.debug('ai-summarize', { settings: { ...settings, geminiApiKey: maskedKey }, apiKeyLength: settings.geminiApiKey?.length ?? 0 });
       try {
         const result = await summarize(message.payload.text, settings.geminiApiKey);
         return { type: 'AI_SUMMARIZE_RESULT', payload: result };
@@ -209,8 +207,7 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
       const maskedKey = settings.geminiApiKey 
         ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
         : 'MISSING';
-      logger.debug('AI_REWRITE - Full settings object:', { ...settings, geminiApiKey: maskedKey });
-      logger.debug('AI_REWRITE - API key length:', settings.geminiApiKey?.length ?? 0);
+      logger.debug('ai-rewrite', { settings: { ...settings, geminiApiKey: maskedKey }, apiKeyLength: settings.geminiApiKey?.length ?? 0 });
       try {
         const result = await rewrite(message.payload.text, message.payload.tone, settings.geminiApiKey);
         return { type: 'AI_REWRITE_RESULT', payload: result };
@@ -242,6 +239,20 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
         type: 'ERROR',
         payload: { code: 'UNKNOWN' as const, message: 'Unknown message type' },
       };
+    }
+  } catch (error) {
+    logger.error('background', { 
+      action: 'unhandled-error', 
+      messageType: message.type,
+      error: error instanceof Error ? error.message : String(error) 
+    });
+    return {
+      type: 'ERROR',
+      payload: {
+        code: 'UNKNOWN',
+        message: error instanceof Error ? error.message : 'Unexpected error in message handler.',
+      },
+    };
   }
 }
 
@@ -249,7 +260,7 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
 // Usage: await clearAllStorage()
 export async function clearAllStorage(): Promise<void> {
   await chrome.storage.local.clear();
-  logger.debug('All storage cleared successfully');
+  logger.debug('storage', { action: 'cleared-all' });
 }
 
 export function initBackground(): void {
