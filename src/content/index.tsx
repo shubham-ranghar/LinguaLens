@@ -257,7 +257,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
         const wrapper = document.createElement('div');
         wrapper.className = 'll-root ll-root--host';
         // Set maximum z-index to ensure visibility on all sites
-        wrapper.style.zIndex = '2147483647';
+        wrapper.style.zIndex = '999999';
         wrapper.style.position = 'fixed';
         // Don't set pointerEvents to none - it will block clicks
         // The individual components handle their own pointer events
@@ -286,7 +286,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
     const shadowHost = shadowUi.uiContainer;
     if (shadowHost) {
       shadowHost.style.pointerEvents = 'auto';
-      shadowHost.style.zIndex = '2147483647';
+      shadowHost.style.zIndex = '999999';
     }
   }
 
@@ -519,10 +519,12 @@ export function initContentScript(ctx: ContentScriptContext): void {
     }
 
     // Observe body for shadow roots and iframes (but not all DOM changes)
+    // Using subtree: false for better performance - only direct children are observed
+    // Shadow roots and iframes are still detected via the head observer and tree walker
     if (document.body) {
       mutationObserver.observe(document.body, {
         childList: true,
-        subtree: true,
+        subtree: false,
         attributes: false,
         characterData: false,
       });
@@ -637,6 +639,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
     
     let lastPollText = '';
     let activityDetected = false;
+    let pollInterval = 500; // Start with 500ms
     
     pollingInterval = window.setInterval(() => {
       const text = getSelectedText();
@@ -649,19 +652,29 @@ export function initContentScript(ctx: ContentScriptContext): void {
           logger.debug('content-script', { action: 'polling-detected-selection', textPreview: text.substring(0, 30) });
           lastPollText = text;
           activityDetected = true;
+          // Increase polling frequency when activity detected (200ms)
+          if (pollInterval !== 200) {
+            pollInterval = 200;
+            window.clearInterval(pollingInterval);
+            pollingInterval = window.setInterval(arguments.callee as () => void, pollInterval);
+          }
         }
         void handleSelectionChange();
       } else if (!text) {
         lastPollText = '';
-        // Reduce polling frequency when no activity detected
+        // Reduce polling frequency when no activity detected (2000ms)
         if (activityDetected) {
           activityDetected = false;
-          // Could implement adaptive polling here if needed
+          if (pollInterval !== 2000) {
+            pollInterval = 2000;
+            window.clearInterval(pollingInterval);
+            pollingInterval = window.setInterval(arguments.callee as () => void, pollInterval);
+          }
         }
       }
-    }, 500); // Check every 500ms
+    }, pollInterval);
     
-    logger.debug('content-script', { action: 'polling-setup' });
+    logger.debug('content-script', { action: 'polling-setup', initialInterval: pollInterval });
   }
 
   // ============================================
@@ -747,30 +760,8 @@ export function initContentScript(ctx: ContentScriptContext): void {
   // Uncomment if needed for specific sites
   // forceTextSelection();
 
-  // Handle URL changes via history API (for SPAs)
-  const originalPushState = history.pushState;
-  const originalReplaceState = history.replaceState;
-  
-  history.pushState = function(...args) {
-    originalPushState.apply(history, args);
-    if (window.location.href !== lastUrl) {
-      lastUrl = window.location.href;
-      logger.debug('content-script', { action: 'url-changed-pushstate', url: lastUrl });
-      uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
-      renderUi();
-    }
-  };
-  
-  history.replaceState = function(...args) {
-    originalReplaceState.apply(history, args);
-    if (window.location.href !== lastUrl) {
-      lastUrl = window.location.href;
-      logger.debug('content-script', { action: 'url-changed-replacestate', url: lastUrl });
-      uiState = { mode: 'hidden', text: '', position: { top: 0, left: 0 } };
-      renderUi();
-    }
-  };
-
+  // Handle URL changes via popstate event (for back/forward navigation)
+  // SPA navigation is detected via MutationObserver on title changes
   window.addEventListener('popstate', () => {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;

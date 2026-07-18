@@ -131,3 +131,82 @@ export async function rewrite(text: string, tone: RewriteTone, apiKey: string): 
   const prompt = `${toneInstructions[tone]}\n\nOriginal text:\n${text}\n\nReturn only the rewritten text, no explanation.`;
   return callGemini(prompt, apiKey);
 }
+
+export async function translateHinglish(text: string, targetLanguage: string, apiKey: string): Promise<string> {
+  const targetLanguageName = getLanguageName(targetLanguage);
+  const prompt = `Translate this Hinglish (romanized, code-mixed Hindi-English) text to ${targetLanguageName}. Preserve meaning, tone, and any English words the user intentionally kept in English. Return only the translation, no explanation:\n\n${text}`;
+  return callGemini(prompt, apiKey);
+}
+
+function getLanguageName(code: string): string {
+  const languageNames: Record<string, string> = {
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'it': 'Italian',
+    'pt': 'Portuguese',
+    'ru': 'Russian',
+    'zh': 'Chinese',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'ar': 'Arabic',
+    'hi': 'Hindi',
+    'bn': 'Bengali',
+    'tr': 'Turkish',
+    'nl': 'Dutch',
+    'pl': 'Polish',
+    'vi': 'Vietnamese',
+    'th': 'Thai',
+    'id': 'Indonesian',
+    'ms': 'Malay',
+    'tl': 'Filipino',
+    'he': 'Hebrew',
+    'fa': 'Persian',
+    'ur': 'Urdu',
+    'ta': 'Tamil',
+    'te': 'Telugu',
+    'kn': 'Kannada',
+    'ml': 'Malayalam',
+    'mr': 'Marathi',
+    'gu': 'Gujarati',
+    'pa': 'Punjabi',
+    'ne': 'Nepali',
+    'si': 'Sinhala',
+    'my': 'Burmese',
+    'km': 'Khmer',
+    'lo': 'Lao',
+    'am': 'Amharic',
+    'so': 'Somali',
+    'sw': 'Swahili',
+    'zu': 'Zulu',
+    'xh': 'Xhosa',
+    'af': 'Afrikaans',
+    'ga': 'Irish',
+    'cy': 'Welsh',
+    'br': 'Breton',
+    'kw': 'Cornish',
+    'gd': 'Scottish Gaelic',
+    'eu': 'Basque',
+    'ca': 'Catalan',
+    'gl': 'Galician',
+    'oc': 'Occitan',
+    'ku': 'Kurdish',
+    'az': 'Azerbaijani',
+    'kk': 'Kazakh',
+    'uz': 'Uzbek',
+    'ug': 'Uyghur',
+    'bo': 'Tibetan',
+    'dz': 'Dzongkha',
+    'mn': 'Mongolian',
+    'hy': 'Armenian',
+    'ka': 'Georgian',
+    'ce': 'Chechen',
+    'ab': 'Abkhaz',
+    'os': 'Ossetic',
+    'tt': 'Tatar',
+    'ba': 'Bashkir',
+    'cv': 'Chuvash',
+  };
+  return languageNames[code] || code;
+}

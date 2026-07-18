@@ -55,7 +55,10 @@ export function isSingleWord(text: string): boolean {
 export { applyThemeToRoot, initTheme, resolveTheme, watchSystemTheme } from './theme';
 
 export function speakText(text: string, lang: string): void {
-  if (!('speechSynthesis' in window)) return;
+  if (!('speechSynthesis' in window)) {
+    console.warn('Speech synthesis is not supported in this browser. Pronunciation feature is unavailable.');
+    return;
+  }
 
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);

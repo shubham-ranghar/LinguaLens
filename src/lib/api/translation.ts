@@ -2,6 +2,9 @@ import type { TranslationRequest, TranslationResult } from '@/types';
 import { isSingleWord, normalizeLanguageCode, resolveSourceLanguage } from '@/lib/utils';
 import { franc } from 'franc';
 import { logger } from '@/lib/logger';
+import { detectHinglish } from '@/lib/detection/hinglishDetector';
+import { translateHinglish } from '@/lib/api/ai-features';
+import { transliterateHinglishToDevanagari } from '@/lib/transliteration/hinglishToDevanagari';
 
 // Configuration constants for language detection
 export const MIN_RELIABLE_DETECTION_LENGTH = 20;
@@ -959,6 +962,17 @@ export function detectLanguage(text: string): { language: string | null; method:
     }
   }
   
+  // Step 2.5: Hinglish detection for Latin-script text (code-mixed Hindi-English)
+  // Only runs if script is Latin (script heuristic returned null)
+  const hinglishDetection = detectHinglish(text);
+  if (hinglishDetection.language) {
+    return { 
+      language: hinglishDetection.language, 
+      method: hinglishDetection.method, 
+      confidence: hinglishDetection.confidence 
+    };
+  }
+  
   // Step 3: Text too short for statistical detection - return uncertain
   if (textLength < MIN_FRANC_DETECTION_LENGTH) {
     logger.debug('detection', { status: 'too-short', length: textLength });
@@ -990,7 +1004,7 @@ const DICTIONARY_ENDPOINT = 'https://api.dictionaryapi.dev/api/v2/entries/en';
  */
 export interface TranslationProvider {
   readonly name: string;
-  translate(request: TranslationRequest, myMemoryEmail?: string): Promise<TranslationResult>;
+  translate(request: TranslationRequest, myMemoryEmail?: string, settings?: import('@/types').UserSettings): Promise<TranslationResult>;
 }
 
 interface MyMemoryResponse {
@@ -1140,7 +1154,7 @@ function toMyMemoryLang(code: string): string {
 export class MyMemoryTranslationProvider implements TranslationProvider {
   readonly name = 'mymemory';
 
-  async translate(request: TranslationRequest, myMemoryEmail?: string): Promise<TranslationResult> {
+  async translate(request: TranslationRequest, myMemoryEmail?: string, settings?: import('@/types').UserSettings): Promise<TranslationResult> {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       throw translationError('OFFLINE', 'You appear to be offline.');
     }
@@ -1176,6 +1190,72 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
         confidence: detectionResult.confidence,
         textLength: text.length,
       });
+
+      // Handle Hinglish (hi-Latn) detection with dual-path routing
+      if (detectedSource === 'hi-Latn') {
+        logger.debug('hinglish-detected', { 
+          text: text.substring(0, 50),
+          target,
+          mode: settings?.hinglishTranslationMode || 'auto',
+          hasGeminiKey: !!settings?.geminiApiKey
+        });
+
+        const mode = settings?.hinglishTranslationMode || 'auto';
+        const hasGeminiKey = !!settings?.geminiApiKey?.trim();
+
+        // Route based on mode and API key availability
+        if (mode === 'gemini' || (mode === 'auto' && hasGeminiKey)) {
+          // Use Gemini for direct Hinglish translation
+          try {
+            logger.debug('hinglish-route', { route: 'gemini', reason: 'gemini-preferred-or-available' });
+            const apiKey = settings?.geminiApiKey || '';
+            if (!apiKey) {
+              throw new Error('MISSING_API_KEY');
+            }
+            const translatedText = await translateHinglish(text, target, apiKey);
+            
+            return {
+              translatedText,
+              detectedSourceLanguage: 'hi-Latn',
+              targetLanguage: target,
+              provider: 'gemini',
+              cached: false,
+            };
+          } catch (error) {
+            logger.error('hinglish-gemini-failed', { 
+              error: error instanceof Error ? error.message : String(error) 
+            });
+            // Fall through to transliteration path if Gemini fails
+          }
+        }
+
+        // Transliteration path (either forced or Gemini unavailable)
+        if (mode === 'transliteration' || mode === 'auto') {
+          logger.debug('hinglish-route', { route: 'transliteration', reason: 'transliteration-preferred-or-gemini-failed' });
+          
+          try {
+            const devanagariText = transliterateHinglishToDevanagari(text);
+            logger.debug('hinglish-transliteration', { 
+              original: text.substring(0, 50),
+              transliterated: devanagariText.substring(0, 50)
+            });
+
+            // Use Devanagari text for normal MyMemory translation
+            const devanagariRequest = { ...request, text: devanagariText };
+            const result = await this.translate(devanagariRequest, myMemoryEmail, settings);
+            
+            return {
+              ...result,
+              detectedSourceLanguage: 'hi-Latn', // Keep original detection
+            };
+          } catch (error) {
+            logger.error('hinglish-transliteration-failed', { 
+              error: error instanceof Error ? error.message : String(error) 
+            });
+            // Fall through to normal detection handling
+          }
+        }
+      }
 
       // When detection is uncertain (null or low confidence), surface this to the user
       // instead of silently falling back to a hardcoded language

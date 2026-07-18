@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { detectLanguage, splitIntoChunks, MIN_RELIABLE_DETECTION_LENGTH, MIN_DICTIONARY_LOOKUP_LENGTH, MIN_FRANC_DETECTION_LENGTH } from './translation';
+import { detectHinglish, HINGLISH_TOKEN_RATIO_THRESHOLD, MIN_TOKENS_FOR_DETECTION } from '@/lib/detection/hinglishDetector';
 
 describe('Language Detection', () => {
   describe('Script-based heuristics', () => {
@@ -420,5 +421,141 @@ describe('Same-Language Detection', () => {
     const result = detectLanguage(shortText);
     expect(result.language).toBeNull();
     expect(result.confidence).toBe(0);
+  });
+});
+
+describe('Hinglish Detection', () => {
+  describe('Detection of Hinglish text', () => {
+    it('should detect clear Hinglish text', () => {
+      const hinglishText = 'yaar kal milte hain';
+      const result = detectHinglish(hinglishText);
+      
+      expect(result.language).toBe('hi-Latn');
+      expect(result.method).toBe('hinglish-lexical');
+      expect(result.confidence).toBeGreaterThan(0);
+      expect(result.matchedTokens).toBeGreaterThan(0);
+      expect(result.totalTokens).toBeGreaterThan(0);
+      expect(result.ratio).toBeGreaterThanOrEqual(HINGLISH_TOKEN_RATIO_THRESHOLD);
+    });
+
+    it('should detect Hinglish with mixed English-Hindi', () => {
+      const mixedText = 'send karo the file please';
+      const result = detectHinglish(mixedText);
+      
+      expect(result.language).toBe('hi-Latn');
+      expect(result.method).toBe('hinglish-lexical');
+      expect(result.confidence).toBeGreaterThan(0);
+    });
+
+    it('should not detect pure English text as Hinglish', () => {
+      const englishText = 'Hello world, how are you today?';
+      const result = detectHinglish(englishText);
+      
+      expect(result.language).toBeNull();
+      expect(result.confidence).toBe(0);
+    });
+
+    it('should not detect pure Hindi in Devanagari as Hinglish', () => {
+      const devanagariText = 'नमस्ते दुनिया';
+      const result = detectHinglish(devanagariText);
+      
+      expect(result.language).toBeNull();
+      expect(result.confidence).toBe(0);
+    });
+
+    it('should handle text below minimum token threshold', () => {
+      const shortText = 'hai';
+      const result = detectHinglish(shortText);
+      
+      expect(result.language).toBeNull();
+      expect(result.confidence).toBe(0);
+    });
+  });
+
+  describe('Token ratio threshold', () => {
+    it('should use HINGLISH_TOKEN_RATIO_THRESHOLD constant', () => {
+      expect(HINGLISH_TOKEN_RATIO_THRESHOLD).toBe(0.15);
+    });
+
+    it('should use MIN_TOKENS_FOR_DETECTION constant', () => {
+      expect(MIN_TOKENS_FOR_DETECTION).toBe(3);
+    });
+
+    it('should require minimum tokens for detection', () => {
+      const twoTokenText = 'hai kya';
+      const result = detectHinglish(twoTokenText);
+      
+      expect(result.language).toBeNull();
+      expect(result.confidence).toBe(0);
+    });
+
+    it('should detect with minimum tokens when ratio is high', () => {
+      const threeTokenHinglish = 'hai kya bhai';
+      const result = detectHinglish(threeTokenHinglish);
+      
+      expect(result.language).toBe('hi-Latn');
+      expect(result.confidence).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Edge cases', () => {
+    it('should handle empty text', () => {
+      const result = detectHinglish('');
+      expect(result.language).toBeNull();
+      expect(result.confidence).toBe(0);
+    });
+
+    it('should handle whitespace-only text', () => {
+      const result = detectHinglish('   ');
+      expect(result.language).toBeNull();
+      expect(result.confidence).toBe(0);
+    });
+
+    it('should handle punctuation', () => {
+      const textWithPunctuation = 'yaar, kal milte hain!';
+      const result = detectHinglish(textWithPunctuation);
+      
+      expect(result.language).toBe('hi-Latn');
+      expect(result.confidence).toBeGreaterThan(0);
+    });
+
+    it('should handle mixed case', () => {
+      const mixedCaseText = 'Yaar Kal Milte Hain';
+      const result = detectHinglish(mixedCaseText);
+      
+      expect(result.language).toBe('hi-Latn');
+      expect(result.confidence).toBeGreaterThan(0);
+    });
+
+    it('should handle numbers mixed with Hinglish', () => {
+      const textWithNumbers = '2 ghante baad milte hain';
+      const result = detectHinglish(textWithNumbers);
+      
+      expect(result.language).toBe('hi-Latn');
+      expect(result.confidence).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Confidence scoring', () => {
+    it('should give higher confidence for higher Hinglish token ratio', () => {
+      const highRatioText = 'yaar kal milte hain kya karte ho bhai';
+      const lowRatioText = 'hello yaar how are you';
+      
+      const highResult = detectHinglish(highRatioText);
+      const lowResult = detectHinglish(lowRatioText);
+      
+      if (highResult.language && lowResult.language) {
+        expect(highResult.confidence).toBeGreaterThan(lowResult.confidence);
+      }
+    });
+
+    it('should cap confidence at reasonable maximum', () => {
+      const veryHinglishText = 'yaar bhai kya karte ho kal milte hain theek hai acha';
+      const result = detectHinglish(veryHinglishText);
+      
+      if (result.language) {
+        expect(result.confidence).toBeLessThanOrEqual(0.85);
+      }
+    });
   });
 });

@@ -19,6 +19,7 @@ export function OptionsApp() {
     myMemoryEmail: '',
     geminiApiKey: '',
     maxHistoryItems: 100,
+    hinglishTranslationMode: 'auto',
   });
 
   useEffect(() => {
@@ -183,6 +184,23 @@ export function OptionsApp() {
               <span className="ll-settings-field__caption">
                 MyMemory raises the daily free limit from ~5,000 to ~50,000 words per day when an
                 email is provided. MyMemory does not send mail — it only uses this to track quota.
+              </span>
+            </div>
+            <div className="ll-settings-field">
+              <label className="ll-settings-field__label">Hinglish translation mode</label>
+              <select
+                value={settings.hinglishTranslationMode || 'auto'}
+                onChange={(e) => patch({ hinglishTranslationMode: e.target.value as 'auto' | 'gemini' | 'transliteration' })}
+                className="ll-field ll-field--settings ll-focus-ring"
+              >
+                <option value="auto">Auto (prefer Gemini if available, otherwise transliterate)</option>
+                <option value="gemini">Gemini API (best quality, requires API key)</option>
+                <option value="transliteration">Transliteration (convert to Devanagari first)</option>
+              </select>
+              <span className="ll-settings-field__caption">
+                Hinglish is romanized, code-mixed Hindi-English text (e.g., "yaar kal milte hain"). 
+                Translation quality is best with a Gemini API key configured. Transliteration mode 
+                converts Hinglish to Devanagari script before translation.
               </span>
             </div>
           </div>

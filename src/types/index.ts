@@ -9,6 +9,7 @@ export interface UserSettings {
   myMemoryEmail: string;
   geminiApiKey: string;
   maxHistoryItems: number;
+  hinglishTranslationMode: 'auto' | 'gemini' | 'transliteration';
 }
 
 export interface TranslationRequest {
@@ -43,6 +44,12 @@ export interface HistoryEntry {
   url: string;
 }
 
+export interface CacheEntry {
+  key: string;
+  result: TranslationResult;
+  timestamp: number;
+}
+
 export interface VocabularyEntry {
   id: string;
   sourceText: string;
@@ -69,3 +76,4 @@ export interface ApiError {
   code: TranslationErrorCode;
   message: string;
 }
+

@@ -58,6 +58,7 @@ async function handleTranslate(
       const result = await provider.translate(
         { ...payload, sourceLanguage: requestedSource, targetLanguage: target },
         settings.myMemoryEmail || undefined,
+        settings,
       );
 
       // Cache to disk (persists across restarts)

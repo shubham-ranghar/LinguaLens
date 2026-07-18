@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   myMemoryEmail: '',
   geminiApiKey: '',
   maxHistoryItems: 100,
+  hinglishTranslationMode: 'auto',
 };
 
 export const STORAGE_KEYS = {

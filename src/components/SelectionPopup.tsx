@@ -75,6 +75,25 @@ function CloseIcon() {
   );
 }
 
+function CopyIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
 function errorMessageFromCode(code: string, fallback: string): string {
   const map: Record<string, string> = {
     OFFLINE: t('offline'),
@@ -137,6 +156,7 @@ export function SelectionPopup({
   const [view, setView] = useState<ViewState>({ status: 'idle' });
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [savedToVocab, setSavedToVocab] = useState(false);
+  const [copiedToClipboard, setCopiedToClipboard] = useState(false);
   const selectedTextRef = useRef(selectedText);
 
   // Only block when both dropdowns explicitly pick the same language.
@@ -184,6 +204,18 @@ export function SelectionPopup({
       });
       setSavedToVocab(true);
       window.setTimeout(() => setSavedToVocab(false), 2000);
+    } catch {
+      // Silently fail or show error
+    }
+  }, [view]);
+
+  const handleCopyToClipboard = useCallback(async () => {
+    if (view.status !== 'success') return;
+    
+    try {
+      await navigator.clipboard.writeText(view.result.translatedText);
+      setCopiedToClipboard(true);
+      window.setTimeout(() => setCopiedToClipboard(false), 2000);
     } catch {
       // Silently fail or show error
     }
@@ -385,7 +417,7 @@ export function SelectionPopup({
     position: 'fixed',
     top: Math.max(8, Math.min(position.top + 8, window.innerHeight - POPUP_MAX_HEIGHT - 8)),
     left: Math.min(Math.max(position.left, 8), window.innerWidth - 360),
-    zIndex: 2147483647,
+    zIndex: 999999,
     width: 340,
     maxHeight: `min(${POPUP_MAX_HEIGHT}px, calc(100vh - 24px))`,
   };
@@ -459,7 +491,7 @@ export function SelectionPopup({
 
             {isSameLanguage && (
               <p className="ll-banner ll-banner--warning ll-selection-popup__banner" role="status">
-                Source and target language are the same — choose a different target to translate.
+                {t('sameLanguageWarning')}
               </p>
             )}
 
@@ -479,7 +511,7 @@ export function SelectionPopup({
 
             {view.status === 'loading' && (
               <div className="ll-selection-popup__loading">
-                <LoadingSpinner message="Translating…" />
+                <LoadingSpinner message={t('loading')} />
               </div>
             )}
 
@@ -487,7 +519,7 @@ export function SelectionPopup({
 
             {view.status === 'ai-loading' && (
               <div className="ll-selection-popup__loading">
-                <LoadingSpinner message={`Processing ${view.aiOperation}…`} />
+                <LoadingSpinner message={t('processing').replace('{operation}', view.aiOperation)} />
               </div>
             )}
 
@@ -502,7 +534,7 @@ export function SelectionPopup({
                     setView({ status: 'idle' });
                   }}
                 >
-                  Back to translation
+                  {t('backToTranslation')}
                 </Button>
               </div>
             )}
@@ -512,7 +544,7 @@ export function SelectionPopup({
                 <p className="ll-selection-popup__translation" aria-live="polite">{view.aiResult}</p>
                 {view.aiOperation === 'grammar' && view.grammarChanges && view.grammarChanges.length > 0 && (
                   <div className="ll-selection-popup__dictionary">
-                    <p className="ll-selection-popup__dictionary-pos">Changes</p>
+                    <p className="ll-selection-popup__dictionary-pos">{t('grammarChanges')}</p>
                     {view.grammarChanges.map((change, i) => (
                       <p key={i} className="ll-text-secondary">
                         "{change.original}" → "{change.fixed}" ({change.reason})
@@ -528,7 +560,7 @@ export function SelectionPopup({
                     setView({ status: 'idle' });
                   }}
                 >
-                  Back to translation
+                  {t('backToTranslation')}
                 </Button>
               </div>
             )}
@@ -539,7 +571,7 @@ export function SelectionPopup({
                   <>
                     <div className="ll-banner ll-banner--warning ll-selection-popup__banner" role="status">
                       <span className="mr-1.5" aria-hidden="true">⚠️</span>
-                      Detected language is the same as your target language — no translation needed.
+                      {t('detectedSameLanguageWarning')}
                     </div>
                     <p className="ll-selection-popup__meta">
                       Detected: {getLanguageLabel(view.result.detectedSourceLanguage ?? 'Unknown')}
@@ -552,7 +584,7 @@ export function SelectionPopup({
                         setView({ status: 'idle' });
                       }}
                     >
-                      Try a different target language
+                      {t('tryDifferentTarget')}
                     </Button>
                   </>
                 ) : (
@@ -599,6 +631,18 @@ export function SelectionPopup({
               <Button
                 variant="ghost"
                 size="sm"
+                disabled={view.status !== 'success' || copiedToClipboard}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleCopyToClipboard();
+                }}
+                aria-label="Copy translation"
+              >
+                <span className={copiedToClipboard ? 'll-animate-fade-in' : ''}>{copiedToClipboard ? t('copied') : <><CopyIcon /> {t('copy')}</>}</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 disabled={view.status !== 'success' || savedToVocab}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -606,7 +650,7 @@ export function SelectionPopup({
                 }}
                 aria-label="Save to vocabulary"
               >
-                <span className={savedToVocab ? 'll-animate-fade-in' : ''}>{savedToVocab ? '✓ Saved' : `📚 ${t('saveToVocabulary')}`}</span>
+                <span className={savedToVocab ? 'll-animate-fade-in' : ''}>{savedToVocab ? t('saved') : `📚 ${t('saveToVocabulary')}`}</span>
               </Button>
             </div>
 
@@ -674,7 +718,7 @@ export function FloatingTrigger({ position, onClick }: FloatingTriggerProps) {
     position: 'fixed',
     top: position.top,
     left: position.left,
-    zIndex: 2147483646,
+    zIndex: 999998,
   };
 
   return (

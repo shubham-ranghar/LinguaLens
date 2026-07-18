@@ -27,6 +27,15 @@ export const uiStrings = {
   targetLanguage: 'To',
   autoDetect: 'Auto-detect',
   openSettings: 'Open settings',
+  processing: 'Processing {operation}…',
+  backToTranslation: 'Back to translation',
+  sameLanguageWarning: 'Source and target language are the same — choose a different target to translate.',
+  detectedSameLanguageWarning: 'Detected language is the same as your target language — no translation needed.',
+  tryDifferentTarget: 'Try a different target language',
+  grammarChanges: 'Changes',
+  copied: '✓ Copied',
+  copy: 'Copy',
+  saved: '✓ Saved',
 } as const;
 
 export type UiStringKey = keyof typeof uiStrings;
