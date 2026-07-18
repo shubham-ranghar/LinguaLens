@@ -1327,7 +1327,12 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       };
     }
     
-    logger.debug('api-call', { sourceParam, targetParam, textLength: text.length });
+    logger.debug('api-call', { 
+      sourceParam, 
+      targetParam, 
+      textLength: text.length,
+      isLongText: text.length > MYMEMORY_MAX_CHARS_PER_REQUEST,
+    });
 
     // Use chunking for long text to handle MyMemory's character limit
     const { translatedText, detectedSource: apiDetectedSource, chunkCount } = await translateWithChunking(
@@ -1342,7 +1347,9 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       requestedSource, 
       target, 
       chunkCount,
-      translatedLength: translatedText.length 
+      translatedLength: translatedText.length,
+      originalLength: text.length,
+      lengthRatio: translatedText.length / text.length,
     });
 
     // Apply post-processing to fix common translation quality issues
@@ -1510,12 +1517,22 @@ async function fetchMyMemoryTranslation(
     params.set('de', email);
   }
 
+  const fullUrl = `${MYMEMORY_ENDPOINT}?${params.toString()}`;
+  
   let response: Response;
   try {
-    response = await fetchWithRetry(`${MYMEMORY_ENDPOINT}?${params.toString()}`);
+    response = await fetchWithRetry(fullUrl);
   } catch {
     throw translationError('API_FAILURE', 'Translation failed. Please try again.');
   }
+
+  // Log full request details and response
+  logger.debug('mymemory-api-request', {
+    url: fullUrl,
+    httpStatus: response.status,
+    httpStatusText: response.statusText,
+    hasEmail: !!email,
+  });
 
   if (!response.ok) {
     throw translationError('API_FAILURE', 'Translation failed. Please try again.');
@@ -1529,7 +1546,12 @@ async function fetchMyMemoryTranslation(
   }
 
   // Log full raw API response to see actual structure
-  logger.debug('mymemory-raw-response', { response: data });
+  logger.debug('mymemory-raw-response', { 
+    response: data,
+    translatedText: data.responseData?.translatedText,
+    responseStatus: data.responseStatus,
+    responseDetails: data.responseDetails,
+  });
 
   if (data.responseStatus === 403) {
     // Check if this is the specific "PLEASE SELECT TWO DISTINCT LANGUAGES" error

@@ -11,6 +11,8 @@ export function OptionsApp() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<any[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
   const [defaultSettings] = useState<UserSettings>({
     sourceLanguage: 'auto',
     targetLanguage: 'en',
@@ -36,6 +38,11 @@ export function OptionsApp() {
         logger.error('options-app', { action: 'settings-load-failed', error: err instanceof Error ? err.message : String(err) });
         setError(err instanceof Error ? err.message : 'Failed to load settings');
       });
+    
+    // Load debug logs
+    chrome.storage.local.get('debugLogs').then((result) => {
+      setDebugLogs(result.debugLogs || []);
+    });
   }, []);
 
   const patch = (partial: Partial<UserSettings>) => {
@@ -65,6 +72,19 @@ export function OptionsApp() {
     setSettings({ ...defaultSettings });
     setHasChanges(true);
     setSaved(false);
+  };
+
+  const handleViewLogs = () => {
+    chrome.storage.local.get('debugLogs').then((result) => {
+      setDebugLogs(result.debugLogs || []);
+      setShowLogs(true);
+    });
+  };
+
+  const handleClearLogs = () => {
+    chrome.storage.local.remove('debugLogs').then(() => {
+      setDebugLogs([]);
+    });
   };
 
   if (!settings) {
@@ -296,6 +316,45 @@ export function OptionsApp() {
                 Your API key is stored locally on your device and never shared.
               </span>
             </div>
+          </div>
+        </section>
+
+        <section className="ll-settings-section">
+          <h2 className="ll-settings-section__title">Debug Logs</h2>
+          <p className="ll-settings-section__description">
+            View translation debug logs to troubleshoot issues. Logs are stored locally and persist across service worker restarts.
+          </p>
+          <div className="ll-settings-field-group">
+            <div className="flex gap-2">
+              <Button variant="settings" onClick={() => void handleViewLogs()}>
+                Show Debug Logs
+              </Button>
+              <Button variant="settings" onClick={() => void handleClearLogs()}>
+                Clear Logs
+              </Button>
+            </div>
+            {showLogs && (
+              <div className="mt-4">
+                <h3 className="ll-text-base font-semibold mb-2">Last 20 Log Entries</h3>
+                {debugLogs.length === 0 ? (
+                  <p className="ll-text-secondary">No debug logs available.</p>
+                ) : (
+                  <div className="ll-card-section max-h-96 overflow-y-auto">
+                    {debugLogs.slice(-20).map((log, index) => (
+                      <div key={index} className="ll-text-sm mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
+                        <div className="ll-text-xs ll-text-disabled mb-1">
+                          {new Date(log.timestamp).toLocaleString()}
+                        </div>
+                        <div className="font-semibold">{log.event}</div>
+                        <pre className="ll-text-xs ll-text-secondary mt-1 whitespace-pre-wrap">
+                          {JSON.stringify(log.data, null, 2)}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </section>
 

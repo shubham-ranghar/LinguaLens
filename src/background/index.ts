@@ -2,7 +2,7 @@ import {
   createFallbackProvider,
   isTranslationError,
 } from '@/lib/api/translation';
-import { correctGrammar, polishTranslation, rewrite, simplify, summarize } from '@/lib/api/ai-features';
+import { correctGrammar, polishTranslation, rewrite, simplify, summarize, translateWithAI } from '@/lib/api/ai-features';
 import { addQuotaWords, countWords, getQuotaStatus } from '@/lib/quota';
 import {
   addHistoryEntry,
@@ -24,12 +24,115 @@ import { logger } from '@/lib/logger';
 // Debouncing cache for in-flight requests to prevent duplicate API calls
 const inFlightRequests = new Map<string, Promise<import('@/types').TranslationResult>>();
 
+// Debug logging to storage for reliable debugging
+interface DebugLogEntry {
+  timestamp: string;
+  event: string;
+  data: Record<string, unknown>;
+}
+
+async function addDebugLog(event: string, data: Record<string, unknown>): Promise<void> {
+  try {
+    const result = await chrome.storage.local.get('debugLogs') as { debugLogs?: DebugLogEntry[] };
+    const logs: DebugLogEntry[] = result.debugLogs || [];
+    logs.push({
+      timestamp: new Date().toISOString(),
+      event,
+      data,
+    });
+    // Keep only last 50 log entries to prevent storage bloat
+    if (logs.length > 50) {
+      logs.splice(0, logs.length - 50);
+    }
+    await chrome.storage.local.set({ debugLogs: logs });
+  } catch (error) {
+    // Silently fail if storage logging fails
+    console.error('Failed to write debug log:', error);
+  }
+}
+
+// Helper function to detect if text contains non-Latin script characters
+function hasNonLatinScript(text: string): boolean {
+  // Check for Devanagari (Hindi), Arabic, CJK (Chinese/Japanese/Korean), Cyrillic (Russian), etc.
+  const nonLatinRanges: [number, number][] = [
+    [0x0900, 0x097F], // Devanagari
+    [0x0600, 0x06FF], // Arabic
+    [0x4E00, 0x9FFF], // CJK Unified Ideographs
+    [0x0400, 0x04FF], // Cyrillic
+    [0xAC00, 0xD7AF], // Hangul (Korean)
+    [0x0590, 0x05FF], // Hebrew
+    [0x0370, 0x03FF], // Greek
+    [0x0E00, 0x0E7F], // Thai
+  ];
+  
+  for (const [start, end] of nonLatinRanges) {
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code >= start && code <= end) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Helper function to detect silent translation failures (when translation returns same text)
+function isSilentFailure(originalText: string, translatedText: string, targetLang?: string): boolean {
+  const normalizedOriginal = originalText.trim().toLowerCase();
+  const normalizedTranslated = translatedText.trim().toLowerCase();
+  
+  // Exact match after normalization
+  if (normalizedOriginal === normalizedTranslated) {
+    console.log('isSilentFailure: exact match detected');
+    return true;
+  }
+  
+  // Near-identical check: if 90% or more of characters are the same
+  const maxLength = Math.max(normalizedOriginal.length, normalizedTranslated.length);
+  if (maxLength === 0) return false;
+  
+  let matches = 0;
+  for (let i = 0; i < Math.min(normalizedOriginal.length, normalizedTranslated.length); i++) {
+    if (normalizedOriginal[i] === normalizedTranslated[i]) {
+      matches++;
+    }
+  }
+  
+  const similarity = matches / maxLength;
+  if (similarity >= 0.9) {
+    console.log('isSilentFailure: 90%+ similarity detected', { similarity });
+    return true;
+  }
+  
+  // Script mismatch detection: if target language requires non-Latin script but translation is still Latin
+  if (targetLang) {
+    const nonLatinTargetLangs = ['hi', 'ar', 'zh', 'ja', 'ko', 'ru', 'he', 'th', 'el'];
+    if (nonLatinTargetLangs.includes(targetLang)) {
+      const hasTargetScript = hasNonLatinScript(translatedText);
+      if (!hasTargetScript) {
+        console.log('isSilentFailure: script mismatch detected', { 
+          targetLang, 
+          hasTargetScript, 
+          translatedPreview: translatedText.substring(0, 50) 
+        });
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
 async function handleTranslate(
   payload: import('@/types').TranslationRequest,
 ): Promise<BackgroundResponse> {
+  console.log('handleTranslate called with text length:', payload.text.length);
+  await addDebugLog('handleTranslate-called', { textLength: payload.text.length });
   const settings = await getSettings();
+  await addDebugLog('settings-loaded', { hasApiKey: !!settings.freeLLMApiKey });
   const requestedSource = payload.sourceLanguage ?? settings.sourceLanguage;
   const target = payload.targetLanguage || settings.targetLanguage;
+  console.log('Requested target:', payload.targetLanguage, 'Settings target:', settings.targetLanguage, 'Final target used:', target);
   const cacheSource =
     requestedSource === 'auto'
       ? 'auto'
@@ -40,6 +143,8 @@ async function handleTranslate(
   const diskCache = await getTranslationCache();
   const diskHit = diskCache.find((c) => c.key === cacheKey);
   if (diskHit) {
+    console.log('Translation found in disk cache, returning cached result');
+    await addDebugLog('disk-cache-hit', { cached: true });
     return { type: 'TRANSLATE_RESULT', payload: { ...diskHit.result, cached: true } };
   }
 
@@ -52,6 +157,7 @@ async function handleTranslate(
 
   // Create new request promise
   const requestPromise = (async () => {
+    let translationMethod = 'primary';
     try {
       // Use fallback provider for resilience
       const provider = createFallbackProvider();
@@ -61,8 +167,52 @@ async function handleTranslate(
         settings,
       );
 
-      // Apply AI polish if enabled
-      if (settings.aiEnhancedTranslation && settings.freeLLMApiKey) {
+      // Check for silent failure (translation returns same/near-identical text)
+      console.log('Checking isSilentFailure for:', payload.text.substring(0, 50), '->', result.translatedText.substring(0, 50));
+      const silentFailure = isSilentFailure(payload.text, result.translatedText, target);
+      console.log('isSilentFailure result:', silentFailure);
+      await addDebugLog('silent-failure-check', { 
+        isSilentFailure: silentFailure,
+        originalPreview: payload.text.substring(0, 50),
+        translatedPreview: result.translatedText.substring(0, 50)
+      });
+      if (silentFailure) {
+        logger.warn('background', { 
+          action: 'silent-failure-detected',
+          originalText: payload.text.substring(0, 100),
+          translatedText: result.translatedText.substring(0, 100),
+        });
+        
+        // Attempt AI fallback if user has FreeLLMAPI key configured
+        await addDebugLog('ai-fallback-check', { hasApiKey: !!settings.freeLLMApiKey });
+        if (settings.freeLLMApiKey) {
+          try {
+            await addDebugLog('ai-fallback-attempted', { targetLanguage: target });
+            logger.info('background', { action: 'attempting-ai-fallback' });
+            const aiTranslation = await translateWithAI(payload.text, target);
+            result = { ...result, translatedText: aiTranslation };
+            translationMethod = 'ai-fallback';
+            await addDebugLog('ai-fallback-success', { 
+              translatedPreview: aiTranslation.substring(0, 100) 
+            });
+            logger.info('background', { action: 'ai-fallback-success', method: translationMethod });
+          } catch (aiError) {
+            // Log AI fallback failure but still return the original (failed) translation
+            await addDebugLog('ai-fallback-failed', { 
+              error: aiError instanceof Error ? aiError.message : String(aiError) 
+            });
+            logger.warn('background', { 
+              action: 'ai-fallback-failed',
+              error: aiError instanceof Error ? aiError.message : String(aiError) 
+            });
+          }
+        } else {
+          await addDebugLog('ai-fallback-skipped', { reason: 'no-api-key' });
+        }
+      }
+
+      // Apply AI polish if enabled (only if not already using AI fallback)
+      if (settings.aiEnhancedTranslation && settings.freeLLMApiKey && translationMethod !== 'ai-fallback') {
         try {
           const polishedText = await polishTranslation(result.translatedText, target);
           result = { ...result, translatedText: polishedText };
@@ -74,6 +224,18 @@ async function handleTranslate(
           });
         }
       }
+
+      // Log which translation method was used
+      logger.info('background', { 
+        action: 'translation-complete',
+        method: translationMethod,
+        targetLanguage: target,
+      });
+      await addDebugLog('translation-complete', { 
+        method: translationMethod,
+        targetLanguage: target,
+        translatedPreview: result.translatedText.substring(0, 100)
+      });
 
       // Cache to disk (persists across restarts)
       await setTranslationCacheEntry({ key: cacheKey, result, timestamp: Date.now() });
@@ -282,6 +444,23 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
 export async function clearAllStorage(): Promise<void> {
   await chrome.storage.local.clear();
   logger.debug('storage', { action: 'cleared-all' });
+}
+
+// DEBUG FUNCTION: View debug logs from service worker console
+// Usage: await viewDebugLogs()
+export async function viewDebugLogs(): Promise<void> {
+  const result = await chrome.storage.local.get('debugLogs') as { debugLogs?: DebugLogEntry[] };
+  const logs = result.debugLogs || [];
+  console.table(logs);
+  console.log('Last 20 log entries:');
+  console.table(logs.slice(-20));
+}
+
+// DEBUG FUNCTION: Clear debug logs
+// Usage: await clearDebugLogs()
+export async function clearDebugLogs(): Promise<void> {
+  await chrome.storage.local.remove('debugLogs');
+  console.log('Debug logs cleared');
 }
 
 export function initBackground(): void {
