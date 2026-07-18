@@ -2,7 +2,7 @@ import {
   createFallbackProvider,
   isTranslationError,
 } from '@/lib/api/translation';
-import { correctGrammar, rewrite, simplify, summarize } from '@/lib/api/ai-features';
+import { correctGrammar, polishTranslation, rewrite, simplify, summarize } from '@/lib/api/ai-features';
 import { addQuotaWords, countWords, getQuotaStatus } from '@/lib/quota';
 import {
   addHistoryEntry,
@@ -55,11 +55,25 @@ async function handleTranslate(
     try {
       // Use fallback provider for resilience
       const provider = createFallbackProvider();
-      const result = await provider.translate(
+      let result = await provider.translate(
         { ...payload, sourceLanguage: requestedSource, targetLanguage: target },
         settings.myMemoryEmail || undefined,
         settings,
       );
+
+      // Apply AI polish if enabled
+      if (settings.aiEnhancedTranslation && settings.freeLLMApiKey) {
+        try {
+          const polishedText = await polishTranslation(result.translatedText, target);
+          result = { ...result, translatedText: polishedText };
+        } catch (polishError) {
+          // Silently fall back to original translation if polish fails
+          logger.warn('background', { 
+            action: 'polish-failed', 
+            error: polishError instanceof Error ? polishError.message : String(polishError) 
+          });
+        }
+      }
 
       // Cache to disk (persists across restarts)
       await setTranslationCacheEntry({ key: cacheKey, result, timestamp: Date.now() });
@@ -100,13 +114,19 @@ function handleAiError(error: unknown): BackgroundResponse {
     if (error.message === 'MISSING_API_KEY') {
       return {
         type: 'ERROR',
-        payload: { code: 'MISSING_API_KEY', message: 'Add your free Gemini API key in Settings.' },
+        payload: { code: 'MISSING_API_KEY', message: 'Add your FreeLLMAPI key in Settings.' },
+      };
+    }
+    if (error.message === 'INVALID_API_KEY') {
+      return {
+        type: 'ERROR',
+        payload: { code: 'INVALID_API_KEY', message: 'Invalid FreeLLMAPI key. Please check your settings.' },
       };
     }
     if (error.message === 'RATE_LIMITED') {
       return {
         type: 'ERROR',
-        payload: { code: 'RATE_LIMITED', message: 'Free tier limit reached, try again shortly.' },
+        payload: { code: 'RATE_LIMITED', message: 'Rate limit reached, try again shortly.' },
       };
     }
     if (error.message === 'TIMEOUT') {
@@ -163,12 +183,12 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
 
     case 'AI_SIMPLIFY': {
       const settings = await getSettings();
-      const maskedKey = settings.geminiApiKey 
-        ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
+      const maskedKey = settings.freeLLMApiKey 
+        ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
         : 'MISSING';
-      logger.debug('ai-simplify', { settings: { ...settings, geminiApiKey: maskedKey }, apiKeyLength: settings.geminiApiKey?.length ?? 0 });
+      logger.debug('ai-simplify', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
       try {
-        const result = await simplify(message.payload.text, settings.geminiApiKey);
+        const result = await simplify(message.payload.text);
         return { type: 'AI_SIMPLIFY_RESULT', payload: result };
       } catch (error) {
         return handleAiError(error);
@@ -177,12 +197,12 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
 
     case 'AI_CORRECT_GRAMMAR': {
       const settings = await getSettings();
-      const maskedKey = settings.geminiApiKey 
-        ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
+      const maskedKey = settings.freeLLMApiKey 
+        ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
         : 'MISSING';
-      logger.debug('ai-correct-grammar', { settings: { ...settings, geminiApiKey: maskedKey }, apiKeyLength: settings.geminiApiKey?.length ?? 0 });
+      logger.debug('ai-correct-grammar', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
       try {
-        const result = await correctGrammar(message.payload.text, settings.geminiApiKey);
+        const result = await correctGrammar(message.payload.text);
         return { type: 'AI_CORRECT_GRAMMAR_RESULT', payload: result };
       } catch (error) {
         return handleAiError(error);
@@ -191,12 +211,12 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
 
     case 'AI_SUMMARIZE': {
       const settings = await getSettings();
-      const maskedKey = settings.geminiApiKey 
-        ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
+      const maskedKey = settings.freeLLMApiKey 
+        ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
         : 'MISSING';
-      logger.debug('ai-summarize', { settings: { ...settings, geminiApiKey: maskedKey }, apiKeyLength: settings.geminiApiKey?.length ?? 0 });
+      logger.debug('ai-summarize', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
       try {
-        const result = await summarize(message.payload.text, settings.geminiApiKey);
+        const result = await summarize(message.payload.text);
         return { type: 'AI_SUMMARIZE_RESULT', payload: result };
       } catch (error) {
         return handleAiError(error);
@@ -205,12 +225,12 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
 
     case 'AI_REWRITE': {
       const settings = await getSettings();
-      const maskedKey = settings.geminiApiKey 
-        ? `${settings.geminiApiKey.substring(0, 6)}...${settings.geminiApiKey.slice(-4)}`
+      const maskedKey = settings.freeLLMApiKey 
+        ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
         : 'MISSING';
-      logger.debug('ai-rewrite', { settings: { ...settings, geminiApiKey: maskedKey }, apiKeyLength: settings.geminiApiKey?.length ?? 0 });
+      logger.debug('ai-rewrite', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
       try {
-        const result = await rewrite(message.payload.text, message.payload.tone, settings.geminiApiKey);
+        const result = await rewrite(message.payload.text, message.payload.tone);
         return { type: 'AI_REWRITE_RESULT', payload: result };
       } catch (error) {
         return handleAiError(error);

@@ -101,6 +101,7 @@ function errorMessageFromCode(code: string, fallback: string): string {
     UNSUPPORTED_LANGUAGE: t('unsupportedLanguage'),
     RATE_LIMITED: t('quotaExceeded'),
     MISSING_API_KEY: t('missingApiKey'),
+    INVALID_API_KEY: 'Invalid FreeLLMAPI key. Please check your settings.',
     TIMEOUT: 'Request timed out. Please try again.',
   };
   if (code === 'RATE_LIMITED' || code === 'API_FAILURE') {
@@ -167,7 +168,7 @@ export function SelectionPopup({
   const isSameLanguage =
     sourceLang !== 'auto' && normalizedSourceLang === normalizedTargetLang;
   const showTranslateButton = settings.popupBehavior === 'click-to-show';
-  const isTranslateBusy = view.status === 'loading' || view.status === 'ai-loading';
+  const isTranslateBusy = view.status === 'loading';
 
   const POPUP_MAX_HEIGHT = 480;
 
@@ -210,10 +211,18 @@ export function SelectionPopup({
   }, [view]);
 
   const handleCopyToClipboard = useCallback(async () => {
-    if (view.status !== 'success') return;
+    let textToCopy: string | undefined;
+    
+    if (view.status === 'success') {
+      textToCopy = view.result.translatedText;
+    } else if (view.status === 'ai-success') {
+      textToCopy = view.aiResult;
+    } else {
+      return;
+    }
     
     try {
-      await navigator.clipboard.writeText(view.result.translatedText);
+      await navigator.clipboard.writeText(textToCopy);
       setCopiedToClipboard(true);
       window.setTimeout(() => setCopiedToClipboard(false), 2000);
     } catch {
@@ -289,7 +298,14 @@ export function SelectionPopup({
   }, [sourceLang, targetLang, loadQuota]);
 
   const handleAiSimplify = useCallback(async () => {
-    const textToProcess = selectedTextRef.current;
+    let textToProcess: string;
+    if (view.status === 'success') {
+      textToProcess = view.result.translatedText;
+    } else if (view.status === 'ai-success') {
+      textToProcess = view.aiResult;
+    } else {
+      textToProcess = selectedTextRef.current;
+    }
     setView({ status: 'ai-loading', aiOperation: 'simplify' });
     try {
       const response = await fetchAiSimplify(textToProcess);
@@ -313,10 +329,17 @@ export function SelectionPopup({
         });
       }
     }
-  }, []);
+  }, [view]);
 
   const handleAiGrammar = useCallback(async () => {
-    const textToProcess = selectedTextRef.current;
+    let textToProcess: string;
+    if (view.status === 'success') {
+      textToProcess = view.result.translatedText;
+    } else if (view.status === 'ai-success') {
+      textToProcess = view.aiResult;
+    } else {
+      textToProcess = selectedTextRef.current;
+    }
     setView({ status: 'ai-loading', aiOperation: 'grammar' });
     try {
       const response = await fetchAiCorrectGrammar(textToProcess);
@@ -346,10 +369,17 @@ export function SelectionPopup({
         });
       }
     }
-  }, []);
+  }, [view]);
 
   const handleAiSummarize = useCallback(async () => {
-    const textToProcess = selectedTextRef.current;
+    let textToProcess: string;
+    if (view.status === 'success') {
+      textToProcess = view.result.translatedText;
+    } else if (view.status === 'ai-success') {
+      textToProcess = view.aiResult;
+    } else {
+      textToProcess = selectedTextRef.current;
+    }
     setView({ status: 'ai-loading', aiOperation: 'summarize' });
     try {
       const response = await fetchAiSummarize(textToProcess);
@@ -373,10 +403,17 @@ export function SelectionPopup({
         });
       }
     }
-  }, []);
+  }, [view]);
 
   const handleAiRewrite = useCallback(async (tone: 'formal' | 'casual' | 'concise') => {
-    const textToProcess = selectedTextRef.current;
+    let textToProcess: string;
+    if (view.status === 'success') {
+      textToProcess = view.result.translatedText;
+    } else if (view.status === 'ai-success') {
+      textToProcess = view.aiResult;
+    } else {
+      textToProcess = selectedTextRef.current;
+    }
     setView({ status: 'ai-loading', aiOperation: `rewrite-${tone}` });
     try {
       const response = await fetchAiRewrite(textToProcess, tone);
@@ -400,7 +437,7 @@ export function SelectionPopup({
         });
       }
     }
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     if (settings.popupBehavior !== 'auto-show') return;
@@ -631,7 +668,7 @@ export function SelectionPopup({
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={view.status !== 'success' || copiedToClipboard}
+                disabled={(view.status !== 'success' && view.status !== 'ai-success') || copiedToClipboard}
                 onClick={(e) => {
                   e.stopPropagation();
                   void handleCopyToClipboard();
@@ -659,7 +696,7 @@ export function SelectionPopup({
               <Button
                 variant="ai"
                 size="sm"
-                disabled={view.status === 'ai-loading' || view.status === 'ai-success' || view.status === 'ai-error'}
+                disabled={view.status === 'ai-loading' && view.aiOperation === 'simplify'}
                 onClick={(e) => {
                   e.stopPropagation();
                   void handleAiSimplify();
@@ -670,7 +707,7 @@ export function SelectionPopup({
               <Button
                 variant="ai"
                 size="sm"
-                disabled={view.status === 'ai-loading' || view.status === 'ai-success' || view.status === 'ai-error'}
+                disabled={view.status === 'ai-loading' && view.aiOperation === 'grammar'}
                 onClick={(e) => {
                   e.stopPropagation();
                   void handleAiGrammar();
@@ -681,7 +718,7 @@ export function SelectionPopup({
               <Button
                 variant="ai"
                 size="sm"
-                disabled={view.status === 'ai-loading' || view.status === 'ai-success' || view.status === 'ai-error'}
+                disabled={view.status === 'ai-loading' && view.aiOperation === 'summarize'}
                 onClick={(e) => {
                   e.stopPropagation();
                   void handleAiSummarize();
@@ -692,7 +729,7 @@ export function SelectionPopup({
               <Button
                 variant="ai"
                 size="sm"
-                disabled={view.status === 'ai-loading' || view.status === 'ai-success' || view.status === 'ai-error'}
+                disabled={view.status === 'ai-loading' && view.aiOperation === 'rewrite-formal'}
                 onClick={(e) => {
                   e.stopPropagation();
                   void handleAiRewrite('formal');

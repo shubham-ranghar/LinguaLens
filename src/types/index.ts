@@ -12,6 +12,9 @@ export interface UserSettings {
   hinglishTranslationMode: 'auto' | 'gemini' | 'transliteration';
   preferNativeWords?: boolean;
   defaultHindiFormality?: 'aap' | 'tum' | 'tu';
+  freeLLMApiKey?: string;
+  freeLLMBaseUrl?: string;
+  aiEnhancedTranslation?: boolean;
 }
 
 export interface TranslationRequest {
@@ -73,6 +76,7 @@ export type TranslationErrorCode =
   | 'RATE_LIMITED'
   | 'INVALID_REQUEST'
   | 'MISSING_API_KEY'
+  | 'INVALID_API_KEY'
   | 'TIMEOUT'
   | 'UNKNOWN';
 

@@ -23,29 +23,35 @@ function setLocal<T>(key: string, value: T): Promise<void> {
 }
 
 /** Settings synced across devices (excludes email and API key used for quota). */
-type SyncedSettings = Omit<UserSettings, 'myMemoryEmail' | 'geminiApiKey'>;
+type SyncedSettings = Omit<UserSettings, 'myMemoryEmail' | 'geminiApiKey' | 'freeLLMApiKey' | 'freeLLMBaseUrl'>;
 
 export async function getSettings(): Promise<UserSettings> {
-  const [stored, myMemoryEmail, geminiApiKey] = await Promise.all([
+  const [stored, myMemoryEmail, geminiApiKey, freeLLMApiKey, freeLLMBaseUrl] = await Promise.all([
     getSync<Partial<SyncedSettings>>(STORAGE_KEYS.settingsSync),
     getLocal<string>(STORAGE_KEYS.myMemoryEmail),
     getLocal<string>(STORAGE_KEYS.geminiApiKey),
+    getLocal<string>(STORAGE_KEYS.freeLLMApiKey),
+    getLocal<string>(STORAGE_KEYS.freeLLMBaseUrl),
   ]);
   return {
     ...DEFAULT_SETTINGS,
     ...stored,
     myMemoryEmail: myMemoryEmail ?? '',
     geminiApiKey: geminiApiKey ?? '',
+    freeLLMApiKey: freeLLMApiKey ?? '',
+    freeLLMBaseUrl: freeLLMBaseUrl ?? '',
   };
 }
 
 export async function saveSettings(partial: Partial<UserSettings>): Promise<UserSettings> {
   const current = await getSettings();
   const merged = { ...current, ...partial };
-  const { myMemoryEmail, geminiApiKey, ...synced } = merged;
+  const { myMemoryEmail, geminiApiKey, freeLLMApiKey, freeLLMBaseUrl, ...synced } = merged;
   await setSync(STORAGE_KEYS.settingsSync, synced);
   await setLocal(STORAGE_KEYS.myMemoryEmail, myMemoryEmail);
   await setLocal(STORAGE_KEYS.geminiApiKey, geminiApiKey);
+  await setLocal(STORAGE_KEYS.freeLLMApiKey, freeLLMApiKey);
+  await setLocal(STORAGE_KEYS.freeLLMBaseUrl, freeLLMBaseUrl);
   return merged;
 }
 

@@ -20,6 +20,9 @@ export function OptionsApp() {
     geminiApiKey: '',
     maxHistoryItems: 100,
     hinglishTranslationMode: 'auto',
+    freeLLMApiKey: '',
+    freeLLMBaseUrl: '',
+    aiEnhancedTranslation: false,
   });
 
   useEffect(() => {
@@ -203,14 +206,67 @@ export function OptionsApp() {
                 converts Hinglish to Devanagari script before translation.
               </span>
             </div>
+            <div className="ll-settings-field">
+              <label className="ll-settings-field__label">AI-Enhanced Translation</label>
+              <select
+                value={settings.aiEnhancedTranslation ? 'true' : 'false'}
+                onChange={(e) => patch({ aiEnhancedTranslation: e.target.value === 'true' })}
+                className="ll-field ll-field--settings ll-focus-ring"
+              >
+                <option value="false">Disabled (faster, no API quota usage)</option>
+                <option value="true">Enabled (improves grammar and naturalness)</option>
+              </select>
+              <span className="ll-settings-field__caption">
+                When enabled, translations are automatically polished by AI to fix grammar errors and unnatural phrasing. This adds latency and uses your FreeLLMAPI quota. Requires a FreeLLMAPI key configured.
+              </span>
+            </div>
           </div>
         </section>
 
         <section className="ll-settings-section">
           <h2 className="ll-settings-section__title">AI Features</h2>
           <p className="ll-settings-section__description">
-            AI features use Google Gemini Flash API for text simplification, grammar correction,
-            summarization, and rewriting. Get a free API key from{' '}
+            AI features use FreeLLMAPI (OpenAI-compatible) for text simplification, grammar correction,
+            summarization, and rewriting.
+          </p>
+          <div className="ll-settings-field-group">
+            <div className="ll-settings-field">
+              <label className="ll-settings-field__label">FreeLLMAPI Key</label>
+              <input
+                type="text"
+                value={settings.freeLLMApiKey || ''}
+                onChange={(e) => patch({ freeLLMApiKey: e.target.value })}
+                placeholder="Enter your FreeLLMAPI key"
+                autoComplete="off"
+                className="ll-field ll-field--settings ll-focus-ring"
+                style={{ display: 'block', width: '100%', minHeight: '40px' }}
+              />
+              <span className="ll-settings-field__caption">
+                Your API key is stored locally on your device and never shared.
+              </span>
+            </div>
+            <div className="ll-settings-field">
+              <label className="ll-settings-field__label">FreeLLMAPI Base URL (optional)</label>
+              <input
+                type="text"
+                value={settings.freeLLMBaseUrl || ''}
+                onChange={(e) => patch({ freeLLMBaseUrl: e.target.value })}
+                placeholder="https://api.freellm.ai"
+                autoComplete="off"
+                className="ll-field ll-field--settings ll-focus-ring"
+                style={{ display: 'block', width: '100%', minHeight: '40px' }}
+              />
+              <span className="ll-settings-field__caption">
+                Leave empty to use the default FreeLLMAPI endpoint.
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section className="ll-settings-section">
+          <h2 className="ll-settings-section__title">Hinglish Translation (Gemini)</h2>
+          <p className="ll-settings-section__description">
+            Hinglish translation uses Google Gemini Flash API for best quality. Get a free API key from{' '}
             <a
               href="https://aistudio.google.com"
               target="_blank"

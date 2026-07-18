@@ -183,6 +183,13 @@ export const logger = {
       details: args.slice(1),
     });
   },
+
+  freellmApi: (...args: unknown[]) => {
+    logger.debug('freellm-api', {
+      message: args.length > 0 ? String(args[0]) : '',
+      details: args.slice(1),
+    });
+  },
 };
 
 /**

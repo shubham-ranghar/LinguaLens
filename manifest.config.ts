@@ -12,7 +12,7 @@ export function defineLinguaLensManifest() {
       'Select text on any page for instant translation, pronunciation, and language learning.',
     version: '0.1.0',
     permissions: ['storage', 'activeTab', 'scripting'],
-    host_permissions: ['https://*/*', 'http://*/*'],
+    host_permissions: ['https://*/*', 'http://*/*', 'http://localhost:*/*', 'http://127.0.0.1:*/*'],
     action: {
       default_title: 'LinguaLens',
       default_popup: 'popup.html',
@@ -39,7 +39,7 @@ export function defineLinguaLensManifest() {
       },
     },
     content_security_policy: {
-      extension_pages: "script-src 'self'; object-src 'self'; connect-src 'self' https://api.mymemory.translated.net https://generativelanguage.googleapis.com",
+      extension_pages: "script-src 'self'; object-src 'self'; connect-src 'self' https://api.mymemory.translated.net https://generativelanguage.googleapis.com http://localhost:* http://127.0.0.1:*",
     },
   };
 }
