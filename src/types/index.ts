@@ -10,6 +10,8 @@ export interface UserSettings {
   geminiApiKey: string;
   maxHistoryItems: number;
   hinglishTranslationMode: 'auto' | 'gemini' | 'transliteration';
+  preferNativeWords?: boolean;
+  defaultHindiFormality?: 'aap' | 'tum' | 'tu';
 }
 
 export interface TranslationRequest {
@@ -32,6 +34,8 @@ export interface TranslationResult {
   antonyms?: string[];
   exampleSentences?: string[];
   sameLanguage?: boolean;
+  lowConfidence?: boolean;
+  qualityWarning?: string;
 }
 
 export interface HistoryEntry {

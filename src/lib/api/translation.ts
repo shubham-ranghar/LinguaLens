@@ -5,6 +5,7 @@ import { logger } from '@/lib/logger';
 import { detectHinglish } from '@/lib/detection/hinglishDetector';
 import { translateHinglish } from '@/lib/api/ai-features';
 import { transliterateHinglishToDevanagari } from '@/lib/transliteration/hinglishToDevanagari';
+import { postProcessTranslation, checkTranslationQuality } from './translationPostProcessor';
 
 // Configuration constants for language detection
 export const MIN_RELIABLE_DETECTION_LENGTH = 20;
@@ -1343,6 +1344,12 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       chunkCount,
       translatedLength: translatedText.length 
     });
+
+    // Apply post-processing to fix common translation quality issues
+    const postProcessedText = postProcessTranslation(translatedText, target, settings);
+    
+    // Check translation quality for languages prone to literal translation
+    const qualityCheck = checkTranslationQuality(postProcessedText, text, target);
     const resolvedSource =
       requestedSource === 'auto'
         ? (detectedSource ?? null)
@@ -1391,7 +1398,7 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
         : await fetchDictionaryEnrichment(text, requestedSource, target, translatedText);
 
     const result = {
-      translatedText,
+      translatedText: postProcessedText,
       detectedSourceLanguage: resolvedSource,
       targetLanguage: target,
       provider: this.name,
@@ -1402,6 +1409,8 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
       antonyms: enrichment?.antonyms ?? [],
       exampleSentences: enrichment?.exampleSentences ?? [],
       sameLanguage: shouldSetSameLanguage,
+      lowConfidence: qualityCheck.lowConfidence,
+      qualityWarning: qualityCheck.warning,
     };
     logger.debug('final-result', {
       detectedSourceLanguage: result.detectedSourceLanguage,

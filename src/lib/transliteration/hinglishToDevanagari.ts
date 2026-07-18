@@ -135,7 +135,18 @@ const COMMON_WORDS_MAP: Record<string, string> = {
 };
 
 /**
- * Transliterate Hinglish text to Devanagari
+ * Check if text is in Devanagari script.
+ * Returns true if the text contains Devanagari characters.
+ */
+export function isDevanagariScript(text: string): boolean {
+  // Devanagari Unicode range: U+0900 to U+097F
+  const devanagariRegex = /[\u0900-\u097F]/;
+  return devanagariRegex.test(text);
+}
+
+/**
+ * Transliterate Hinglish text to Devanagari with fallback check.
+ * If the output is not in Devanagari script, re-runs the conversion.
  * 
  * @param text - Hinglish text in Latin script
  * @returns Devanagari text
@@ -233,6 +244,41 @@ export function transliterateHinglishToDevanagari(text: string): string {
     result,
     wordCount: words.length
   });
+  
+  // Fallback check: if output is not in Devanagari, re-run conversion
+  // This handles cases where MyMemory returns Romanized Hindi instead of Devanagari
+  if (!isDevanagariScript(result) && /[a-zA-Z]/.test(result)) {
+    logger.warn('transliteration-fallback', { 
+      original: text, 
+      result,
+      reason: 'Output not in Devanagari script, re-running conversion'
+    });
+    
+    // Re-run with more aggressive conversion
+    const fallbackWords: string[] = [];
+    for (const word of words) {
+      const lowerWord = word.toLowerCase();
+      if (COMMON_WORDS_MAP[lowerWord]) {
+        fallbackWords.push(COMMON_WORDS_MAP[lowerWord]);
+      } else {
+        // Force conversion using common words map for any remaining Latin text
+        fallbackWords.push(lowerWord.split('').map(char => {
+          // Simple character-level fallback
+          if (COMMON_WORDS_MAP[char]) return COMMON_WORDS_MAP[char];
+          return char; // Keep punctuation/numbers as-is
+        }).join(''));
+      }
+    }
+    
+    const fallbackResult = fallbackWords.join(' ');
+    if (isDevanagariScript(fallbackResult)) {
+      logger.debug('transliteration-fallback-success', { 
+        original: text, 
+        result: fallbackResult
+      });
+      return fallbackResult;
+    }
+  }
   
   return result;
 }
