@@ -30,7 +30,10 @@ interface OpenAIChatResponse {
   choices?: Array<{
     message?: {
       content?: string;
+      reasoning?: string;
+      reasoning_content?: string;
     };
+    finish_reason?: string;
   }>;
 }
 
@@ -48,7 +51,7 @@ async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise
   logger.freellmApi('Base URL:', baseUrl);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
   try {
     // Handle baseUrl that may or may not already include /v1
@@ -74,7 +77,7 @@ async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.7,
-        max_tokens: 500,
+        max_tokens: 2000,  // Increased to handle reasoning model's internal thinking + final answer
       }),
       signal: controller.signal,
     });
@@ -97,12 +100,23 @@ async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise
     }
 
     const data = (await response.json()) as OpenAIChatResponse;
+    console.log('[FreeLLMAPI] Raw response data:', JSON.stringify(data, null, 2));
+    console.log('[FreeLLMAPI] finish_reason:', data.choices?.[0]?.finish_reason);
+    console.log('[FreeLLMAPI] Full message object:', JSON.stringify(data.choices?.[0]?.message, null, 2));
+
     const content = data.choices?.[0]?.message?.content;
 
     if (!content) {
+      console.error('[FreeLLMAPI] No content found in response. Structure:', data);
       throw new Error('API_FAILURE');
     }
 
+    // Check if response was truncated
+    if (data.choices?.[0]?.finish_reason === 'length') {
+      console.warn('[FreeLLMAPI] Response was truncated, consider raising max_tokens further');
+    }
+
+    console.log('[FreeLLMAPI] Extracted content:', content);
     return content.trim();
   } catch (error) {
     clearTimeout(timeoutId);
@@ -239,9 +253,41 @@ export async function polishTranslation(translatedText: string, targetLang: stri
 
 export async function translateWithAI(text: string, targetLang: string): Promise<string> {
   const targetLanguageName = getLanguageName(targetLang);
-  const systemPrompt = `You are a professional translator. Translate the following text to ${targetLanguageName}. Preserve the tone and meaning accurately, including complex sentence structures with multiple clauses. Return only the translation, no explanations.`;
+  const systemPrompt = `You are a professional translator. Translate the following text to ${targetLanguageName}. Preserve tone, meaning, and complex sentence structures. Output only the translation with no extra commentary.`;
   const userPrompt = text;
-  return callFreeLLMAPI(systemPrompt, userPrompt);
+  const response = await callFreeLLMAPI(systemPrompt, userPrompt);
+  
+  // Primary path: use content directly (reasoning is in separate field)
+  const trimmedContent = response.trim();
+  
+  // Safety net: extract content between <translation> tags (for models that don't separate reasoning)
+  const tagMatch = response.match(/<translation>([\s\S]*?)<\/translation>/i);
+  if (tagMatch && tagMatch[1]) {
+    return tagMatch[1].trim();
+  }
+  
+  // Safety net: if opening tag exists but no closing tag (truncated), take everything after opening tag
+  const openingTagMatch = response.match(/<translation>([\s\S]*)$/i);
+  if (openingTagMatch && openingTagMatch[1]) {
+    return openingTagMatch[1].trim();
+  }
+  
+  // Safety net: find all double-quoted strings (20+ chars) and return the last match
+  const quotedStrings = response.match(/"([^"]{20,})"/g);
+  if (quotedStrings && quotedStrings.length > 0) {
+    const lastQuoted = quotedStrings[quotedStrings.length - 1];
+    // Remove the surrounding quotes
+    return lastQuoted.slice(1, -1).trim();
+  }
+  
+  // Safety net: take the last non-empty paragraph
+  const paragraphs = response.split(/\n\n+/).filter(p => p.trim());
+  if (paragraphs.length > 0) {
+    return paragraphs[paragraphs.length - 1].trim();
+  }
+  
+  // Final fallback: return trimmed content (primary path for models with separate reasoning field)
+  return trimmedContent;
 }
 
 function getLanguageName(code: string): string {

@@ -120,6 +120,47 @@ function isSilentFailure(originalText: string, translatedText: string, targetLan
     }
   }
   
+  // Latin-script language check: detect if translation returns original text with language-code prefix
+  if (targetLang && targetLang !== 'en') {
+    // Remove leading language-code prefix like "[es] ", "[fr] ", etc.
+    const cleanedTranslated = translatedText.replace(/^\[[a-z]{2,3}\]\s*/i, '').trim().toLowerCase();
+    const cleanedOriginal = originalText.trim().toLowerCase();
+    
+    // Normalize both by removing punctuation for comparison
+    const removePunctuation = (text: string) => text.replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+    const normalizedCleanedTranslated = removePunctuation(cleanedTranslated);
+    const normalizedCleanedOriginal = removePunctuation(cleanedOriginal);
+    
+    // Check if they're identical after normalization
+    if (normalizedCleanedTranslated === normalizedCleanedOriginal) {
+      console.log('isSilentFailure: identical text after removing language prefix detected', { 
+        targetLang,
+        originalPreview: originalText.substring(0, 50),
+        translatedPreview: translatedText.substring(0, 50)
+      });
+      return true;
+    }
+    
+    // Check word overlap (90%+ of words match)
+    const translatedWords = normalizedCleanedTranslated.split(' ').filter(w => w.length > 0);
+    const originalWords = normalizedCleanedOriginal.split(' ').filter(w => w.length > 0);
+    
+    if (translatedWords.length > 0 && originalWords.length > 0) {
+      const matchingWords = translatedWords.filter(word => originalWords.includes(word));
+      const overlapRatio = matchingWords.length / Math.max(translatedWords.length, originalWords.length);
+      
+      if (overlapRatio >= 0.9) {
+        console.log('isSilentFailure: 90%+ word overlap after removing language prefix detected', { 
+          targetLang,
+          overlapRatio,
+          originalPreview: originalText.substring(0, 50),
+          translatedPreview: translatedText.substring(0, 50)
+        });
+        return true;
+      }
+    }
+  }
+  
   return false;
 }
 
