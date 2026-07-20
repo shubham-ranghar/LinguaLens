@@ -12,7 +12,7 @@ export function defineLinguaLensManifest(isDev = false) {
     name: 'LinguaLens',
     description:
       'Select text on any page for instant translation, pronunciation, and language learning.',
-    version: '0.1.0',
+    version: '1.0.0',
     permissions: ['storage', 'activeTab', 'scripting'],
     host_permissions: ['https://*/*', 'http://*/*', 'http://localhost:*/*', 'http://127.0.0.1:*/*'],
     action: {
