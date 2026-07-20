@@ -258,6 +258,14 @@
     color: #D4D4D8;
   }
 
+  .ll-micro-label--ai {
+    font-size: var(--text-sm);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #D4D4D8;
+  }
+
   /* Shared surfaces — fully opaque */
   .ll-surface {
     background-color: var(--color-surface);

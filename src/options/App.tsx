@@ -13,6 +13,7 @@ export function OptionsApp() {
   const [hasChanges, setHasChanges] = useState(false);
   const [debugLogs, setDebugLogs] = useState<any[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [version, setVersion] = useState<string>('');
   const [defaultSettings] = useState<UserSettings>({
     sourceLanguage: 'auto',
     targetLanguage: 'en',
@@ -43,6 +44,9 @@ export function OptionsApp() {
     chrome.storage.local.get('debugLogs').then((result) => {
       setDebugLogs(result.debugLogs || []);
     });
+
+    // Load version from manifest
+    setVersion(chrome.runtime.getManifest().version);
   }, []);
 
   const patch = (partial: Partial<UserSettings>) => {
@@ -104,7 +108,7 @@ export function OptionsApp() {
           <p className="ll-settings-header__subtitle">
             Configure translation defaults and extension behavior. All data stays on your device.
           </p>
-          <p className="ll-settings-header__version">Version 0.1.0</p>
+          <p className="ll-settings-header__version">Version {version}</p>
         </header>
 
         <div className="ll-settings-status-row">

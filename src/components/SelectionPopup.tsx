@@ -738,7 +738,7 @@ export function SelectionPopup({
                   e.stopPropagation();
                   setAiSectionCollapsed(!aiSectionCollapsed);
                 }}
-                className="ll-micro-label ll-selection-popup__ai-label ll-focus-ring flex items-center gap-1 cursor-pointer hover:text-accent transition-colors"
+                className="ll-micro-label--ai ll-selection-popup__ai-label ll-focus-ring flex items-center gap-1 cursor-pointer hover:text-accent transition-colors"
                 aria-expanded={!aiSectionCollapsed}
               >
                 AI
