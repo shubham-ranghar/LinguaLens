@@ -6,7 +6,8 @@ export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
   manifest: () => {
-    const manifest = defineLinguaLensManifest();
+    const isDev = process.env.NODE_ENV !== 'production' || process.env.WXT_MODE === 'dev';
+    const manifest = defineLinguaLensManifest(isDev);
     return {
       ...manifest,
       options_ui: {

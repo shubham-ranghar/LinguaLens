@@ -5,7 +5,9 @@
  * We use https/http matches (not <all_urls>) and declare host_permissions for HTTP(S).
  * For stricter privacy, users can later switch to optional_host_permissions + opt-in.
  */
-export function defineLinguaLensManifest() {
+export function defineLinguaLensManifest(isDev = false) {
+  const localhostEntries = isDev ? ' http://localhost:* http://127.0.0.1:*' : '';
+  
   return {
     name: 'LinguaLens',
     description:
@@ -39,7 +41,7 @@ export function defineLinguaLensManifest() {
       },
     },
     content_security_policy: {
-      extension_pages: "script-src 'self'; object-src 'self'; connect-src 'self' https://api.mymemory.translated.net https://generativelanguage.googleapis.com http://localhost:* http://127.0.0.1:*",
+      extension_pages: `script-src 'self'; object-src 'self'; connect-src 'self' https://api.mymemory.translated.net https://generativelanguage.googleapis.com${localhostEntries} https://freellmapi-0lx8.onrender.com`,
     },
   };
 }

@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   maxHistoryItems: 100,
   hinglishTranslationMode: 'auto',
   freeLLMApiKey: '',
-  freeLLMBaseUrl: '',
+  freeLLMBaseUrl: 'https://freellmapi-0lx8.onrender.com/v1',
 };
 
 export const STORAGE_KEYS = {

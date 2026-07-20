@@ -1779,12 +1779,11 @@ export class FallbackTranslationProvider implements TranslationProvider {
 }
 
 /**
- * Create a fallback chain with MyMemory as primary and Mock as fallback.
- * To use real providers, replace MockTranslationProvider with configured providers.
+ * Create a fallback chain with MyMemory as primary.
+ * Mock provider removed to prevent tagged text fallback in production.
  */
 export function createFallbackProvider(): TranslationProvider {
   return new FallbackTranslationProvider([
     new MyMemoryTranslationProvider(),
-    new MockTranslationProvider(), // Fallback for development/testing
   ]);
 }

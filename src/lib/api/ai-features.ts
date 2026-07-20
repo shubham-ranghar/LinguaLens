@@ -2,6 +2,10 @@ const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models
 
 import { logger } from '@/lib/logger';
 import { getSettings } from '@/lib/storage';
+import { addDebugLog } from '@/lib/debug';
+
+// Debug flag - set to true for development troubleshooting
+const DEBUG = false;
 
 export type RewriteTone = 'formal' | 'casual' | 'concise';
 
@@ -51,7 +55,7 @@ async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise
   logger.freellmApi('Base URL:', baseUrl);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for Render cold starts
 
   try {
     // Handle baseUrl that may or may not already include /v1
@@ -61,7 +65,7 @@ async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise
         ? `${baseUrl}/chat/completions`
         : `${baseUrl}/v1/chat/completions`;
     
-    console.log('[FreeLLMAPI] Final URL:', endpoint);
+    if (DEBUG) console.log('[FreeLLMAPI] Final URL:', endpoint);
     logger.freellmApi('Calling URL:', endpoint);
 
     const response = await fetch(endpoint, {
@@ -100,9 +104,9 @@ async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise
     }
 
     const data = (await response.json()) as OpenAIChatResponse;
-    console.log('[FreeLLMAPI] Raw response data:', JSON.stringify(data, null, 2));
-    console.log('[FreeLLMAPI] finish_reason:', data.choices?.[0]?.finish_reason);
-    console.log('[FreeLLMAPI] Full message object:', JSON.stringify(data.choices?.[0]?.message, null, 2));
+    if (DEBUG) console.log('[FreeLLMAPI] Raw response data:', JSON.stringify(data, null, 2));
+    if (DEBUG) console.log('[FreeLLMAPI] finish_reason:', data.choices?.[0]?.finish_reason);
+    if (DEBUG) console.log('[FreeLLMAPI] Full message object:', JSON.stringify(data.choices?.[0]?.message, null, 2));
 
     const content = data.choices?.[0]?.message?.content;
 
@@ -113,10 +117,10 @@ async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise
 
     // Check if response was truncated
     if (data.choices?.[0]?.finish_reason === 'length') {
-      console.warn('[FreeLLMAPI] Response was truncated, consider raising max_tokens further');
+      if (DEBUG) console.warn('[FreeLLMAPI] Response was truncated, consider raising max_tokens further');
     }
 
-    console.log('[FreeLLMAPI] Extracted content:', content);
+    if (DEBUG) console.log('[FreeLLMAPI] Extracted content:', content);
     return content.trim();
   } catch (error) {
     clearTimeout(timeoutId);
@@ -137,7 +141,7 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
   logger.geminiApi('API key length:', apiKey.length);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for cold starts
 
   try {
     const url = `${GEMINI_ENDPOINT}?key=${apiKey}`;
@@ -191,42 +195,65 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
 }
 
 export async function simplify(text: string): Promise<string> {
+  await addDebugLog('simplify-started', { textLength: text.length });
   const systemPrompt = 'You are a helpful assistant that simplifies text to make it easier to understand. Use plain language and shorter sentences. IMPORTANT: Respond in the SAME LANGUAGE as the input text. If the input is in Spanish, respond in Spanish. If in French, respond in French, etc. Return only the simplified text, no explanation.';
   const userPrompt = text;
-  return callFreeLLMAPI(systemPrompt, userPrompt);
+  try {
+    const result = await callFreeLLMAPI(systemPrompt, userPrompt);
+    await addDebugLog('simplify-success', { resultPreview: result.substring(0, 100) });
+    return result;
+  } catch (error) {
+    await addDebugLog('simplify-failed', { error: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
 }
 
 export async function correctGrammar(text: string): Promise<GrammarResult> {
+  await addDebugLog('correctGrammar-started', { textLength: text.length });
   const systemPrompt = 'You are a helpful assistant that identifies and corrects grammar mistakes. IMPORTANT: Keep the corrected text in the SAME LANGUAGE as the input text. If the input is in Spanish, correct it in Spanish. If in French, correct it in French, etc. Return a JSON object with "corrected" (the full corrected text) and "changes" (array of objects with "original", "fixed", and "reason"). Return only valid JSON.';
   const userPrompt = text;
-  const response = await callFreeLLMAPI(systemPrompt, userPrompt);
-  
   try {
+    const response = await callFreeLLMAPI(systemPrompt, userPrompt);
+    await addDebugLog('correctGrammar-api-response', { responsePreview: response.substring(0, 100) });
+    
     const jsonStart = response.indexOf('{');
     const jsonEnd = response.lastIndexOf('}');
     if (jsonStart === -1 || jsonEnd === -1) {
+      await addDebugLog('correctGrammar-json-parse-failed', { reason: 'no-json-found' });
       throw new Error('API_FAILURE');
     }
     const jsonStr = response.slice(jsonStart, jsonEnd + 1);
     const result = JSON.parse(jsonStr) as GrammarResult;
     
     if (!result.corrected || !Array.isArray(result.changes)) {
+      await addDebugLog('correctGrammar-json-parse-failed', { reason: 'invalid-structure' });
       throw new Error('API_FAILURE');
     }
     
+    await addDebugLog('correctGrammar-success', { correctedPreview: result.corrected.substring(0, 100), changesCount: result.changes.length });
     return result;
-  } catch {
-    throw new Error('API_FAILURE');
+  } catch (error) {
+    await addDebugLog('correctGrammar-failed', { error: error instanceof Error ? error.message : String(error) });
+    throw error;
   }
 }
 
 export async function summarize(text: string): Promise<string> {
+  await addDebugLog('summarize-started', { textLength: text.length });
   const systemPrompt = 'You are a helpful assistant that summarizes text. Condense the text into a brief summary capturing the main points in 2-3 sentences. IMPORTANT: Respond in the SAME LANGUAGE as the input text. If the input is in Spanish, summarize in Spanish. If in French, summarize in French, etc. Return only the summary, no explanation.';
   const userPrompt = text;
-  return callFreeLLMAPI(systemPrompt, userPrompt);
+  try {
+    const result = await callFreeLLMAPI(systemPrompt, userPrompt);
+    await addDebugLog('summarize-success', { resultPreview: result.substring(0, 100) });
+    return result;
+  } catch (error) {
+    await addDebugLog('summarize-failed', { error: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
 }
 
 export async function rewrite(text: string, tone: RewriteTone): Promise<string> {
+  await addDebugLog('rewrite-started', { textLength: text.length, tone });
   const toneInstructions: Record<RewriteTone, string> = {
     formal: 'Rewrite in a formal, professional tone suitable for business or academic contexts.',
     casual: 'Rewrite in a casual, conversational tone suitable for everyday communication.',
@@ -235,7 +262,14 @@ export async function rewrite(text: string, tone: RewriteTone): Promise<string> 
   
   const systemPrompt = `You are a helpful assistant that rephrases text. ${toneInstructions[tone]} IMPORTANT: Respond in the SAME LANGUAGE as the input text. If the input is in Spanish, rewrite in Spanish. If in French, rewrite in French, etc. Return only the rewritten text, no explanation.`;
   const userPrompt = text;
-  return callFreeLLMAPI(systemPrompt, userPrompt);
+  try {
+    const result = await callFreeLLMAPI(systemPrompt, userPrompt);
+    await addDebugLog('rewrite-success', { resultPreview: result.substring(0, 100) });
+    return result;
+  } catch (error) {
+    await addDebugLog('rewrite-failed', { error: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
 }
 
 export async function translateHinglish(text: string, targetLanguage: string, apiKey: string): Promise<string> {
@@ -253,7 +287,7 @@ export async function polishTranslation(translatedText: string, targetLang: stri
 
 export async function translateWithAI(text: string, targetLang: string): Promise<string> {
   const targetLanguageName = getLanguageName(targetLang);
-  const systemPrompt = `You are a professional translator. Translate the following text to ${targetLanguageName}. Preserve tone, meaning, and complex sentence structures. Output only the translation with no extra commentary.`;
+  const systemPrompt = `You are a professional translator. Translate the following text to ${targetLanguageName}. Output ONLY the translation wrapped in <translation></translation> tags. Do not include headings, explanations, notes, or commentary of any kind, inside or outside the tags.`;
   const userPrompt = text;
   const response = await callFreeLLMAPI(systemPrompt, userPrompt);
   
@@ -270,6 +304,19 @@ export async function translateWithAI(text: string, targetLang: string): Promise
   const openingTagMatch = response.match(/<translation>([\s\S]*)$/i);
   if (openingTagMatch && openingTagMatch[1]) {
     return openingTagMatch[1].trim();
+  }
+  
+  // Safety net: remove markdown headings and split on horizontal rule to get content before explanations
+  let cleanedResponse = response;
+  // Remove bold markdown heading lines
+  cleanedResponse = cleanedResponse.replace(/^\*\*.+\*\*$/gm, '');
+  // Split on horizontal rule (--- or ***) and take first section
+  const sections = cleanedResponse.split(/\n-{3,}\n|\n\*{3,}\n/);
+  if (sections.length > 0) {
+    const firstSection = sections[0].trim();
+    if (firstSection) {
+      return firstSection;
+    }
   }
   
   // Safety net: find all double-quoted strings (20+ chars) and return the last match
@@ -362,3 +409,5 @@ function getLanguageName(code: string): string {
   };
   return languageNames[code] || code;
 }
+
+export { getLanguageName, callFreeLLMAPI };

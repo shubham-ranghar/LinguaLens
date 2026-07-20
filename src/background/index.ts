@@ -2,7 +2,8 @@ import {
   createFallbackProvider,
   isTranslationError,
 } from '@/lib/api/translation';
-import { correctGrammar, polishTranslation, rewrite, simplify, summarize, translateWithAI } from '@/lib/api/ai-features';
+import { correctGrammar, polishTranslation, rewrite, simplify, summarize, translateWithAI, callFreeLLMAPI, getLanguageName } from '@/lib/api/ai-features';
+import { detectHinglish } from '@/lib/detection/hinglishDetector';
 import { addQuotaWords, countWords, getQuotaStatus } from '@/lib/quota';
 import {
   addHistoryEntry,
@@ -17,39 +18,19 @@ import {
   searchVocabulary,
   setTranslationCacheEntry,
 } from '@/lib/storage';
+import { addDebugLog, type DebugLogEntry } from '@/lib/debug';
 import { resolveSourceLanguage } from '@/lib/utils';
 import type { BackgroundRequest, BackgroundResponse } from '@/types/messages';
 import { logger } from '@/lib/logger';
 
+// Debug flag - set to true for development troubleshooting
+const DEBUG = false;
+
 // Debouncing cache for in-flight requests to prevent duplicate API calls
 const inFlightRequests = new Map<string, Promise<import('@/types').TranslationResult>>();
 
-// Debug logging to storage for reliable debugging
-interface DebugLogEntry {
-  timestamp: string;
-  event: string;
-  data: Record<string, unknown>;
-}
-
-async function addDebugLog(event: string, data: Record<string, unknown>): Promise<void> {
-  try {
-    const result = await chrome.storage.local.get('debugLogs') as { debugLogs?: DebugLogEntry[] };
-    const logs: DebugLogEntry[] = result.debugLogs || [];
-    logs.push({
-      timestamp: new Date().toISOString(),
-      event,
-      data,
-    });
-    // Keep only last 50 log entries to prevent storage bloat
-    if (logs.length > 50) {
-      logs.splice(0, logs.length - 50);
-    }
-    await chrome.storage.local.set({ debugLogs: logs });
-  } catch (error) {
-    // Silently fail if storage logging fails
-    console.error('Failed to write debug log:', error);
-  }
-}
+// Cache version for invalidating stale translations after code updates
+const CACHE_VERSION = '3';
 
 // Helper function to detect if text contains non-Latin script characters
 function hasNonLatinScript(text: string): boolean {
@@ -83,7 +64,7 @@ function isSilentFailure(originalText: string, translatedText: string, targetLan
   
   // Exact match after normalization
   if (normalizedOriginal === normalizedTranslated) {
-    console.log('isSilentFailure: exact match detected');
+    if (DEBUG) console.log('isSilentFailure: exact match detected');
     return true;
   }
   
@@ -100,7 +81,7 @@ function isSilentFailure(originalText: string, translatedText: string, targetLan
   
   const similarity = matches / maxLength;
   if (similarity >= 0.9) {
-    console.log('isSilentFailure: 90%+ similarity detected', { similarity });
+    if (DEBUG) console.log('isSilentFailure: 90%+ similarity detected', { similarity });
     return true;
   }
   
@@ -110,7 +91,7 @@ function isSilentFailure(originalText: string, translatedText: string, targetLan
     if (nonLatinTargetLangs.includes(targetLang)) {
       const hasTargetScript = hasNonLatinScript(translatedText);
       if (!hasTargetScript) {
-        console.log('isSilentFailure: script mismatch detected', { 
+        if (DEBUG) console.log('isSilentFailure: script mismatch detected', { 
           targetLang, 
           hasTargetScript, 
           translatedPreview: translatedText.substring(0, 50) 
@@ -133,7 +114,7 @@ function isSilentFailure(originalText: string, translatedText: string, targetLan
     
     // Check if they're identical after normalization
     if (normalizedCleanedTranslated === normalizedCleanedOriginal) {
-      console.log('isSilentFailure: identical text after removing language prefix detected', { 
+      if (DEBUG) console.log('isSilentFailure: identical text after removing language prefix detected', { 
         targetLang,
         originalPreview: originalText.substring(0, 50),
         translatedPreview: translatedText.substring(0, 50)
@@ -150,7 +131,7 @@ function isSilentFailure(originalText: string, translatedText: string, targetLan
       const overlapRatio = matchingWords.length / Math.max(translatedWords.length, originalWords.length);
       
       if (overlapRatio >= 0.9) {
-        console.log('isSilentFailure: 90%+ word overlap after removing language prefix detected', { 
+        if (DEBUG) console.log('isSilentFailure: 90%+ word overlap after removing language prefix detected', { 
           targetLang,
           overlapRatio,
           originalPreview: originalText.substring(0, 50),
@@ -167,26 +148,127 @@ function isSilentFailure(originalText: string, translatedText: string, targetLan
 async function handleTranslate(
   payload: import('@/types').TranslationRequest,
 ): Promise<BackgroundResponse> {
-  console.log('handleTranslate called with text length:', payload.text.length);
+  if (DEBUG) console.log('handleTranslate called with text length:', payload.text.length);
   await addDebugLog('handleTranslate-called', { textLength: payload.text.length });
   const settings = await getSettings();
   await addDebugLog('settings-loaded', { hasApiKey: !!settings.freeLLMApiKey });
   const requestedSource = payload.sourceLanguage ?? settings.sourceLanguage;
   const target = payload.targetLanguage || settings.targetLanguage;
-  console.log('Requested target:', payload.targetLanguage, 'Settings target:', settings.targetLanguage, 'Final target used:', target);
+  if (DEBUG) console.log('Requested target:', payload.targetLanguage, 'Settings target:', settings.targetLanguage, 'Final target used:', target);
   const cacheSource =
     requestedSource === 'auto'
       ? 'auto'
       : resolveSourceLanguage(requestedSource, payload.pageLanguage);
   const cacheKey = buildCacheKey(payload.text, cacheSource, target);
 
+  // Check for Hinglish (romanized Hindi) and route directly to AI if detected
+  if (requestedSource === 'auto' || requestedSource === 'hi-Latn') {
+    const hinglishDetection = detectHinglish(payload.text);
+    if (hinglishDetection.language === 'hi-Latn') {
+      await addDebugLog('hinglish-detected', { 
+        confidence: hinglishDetection.confidence,
+        method: hinglishDetection.method,
+        hasApiKey: !!settings.freeLLMApiKey 
+      });
+      logger.info('background', { 
+        action: 'hinglish-detected',
+        confidence: hinglishDetection.confidence,
+        hasApiKey: !!settings.freeLLMApiKey 
+      });
+
+      if (settings.freeLLMApiKey) {
+        try {
+          await addDebugLog('hinglish-routed-to-ai', { targetLanguage: target });
+          logger.info('background', { action: 'hinglish-routed-to-ai', targetLanguage: target });
+          
+          // Use Hinglish-aware prompt for AI translation
+          const targetLanguageName = getLanguageName(target);
+          const systemPrompt = `You are a professional translator specializing in Hinglish (Hindi written in Latin/Roman script). Translate the following Hinglish text to ${targetLanguageName}. 
+
+IMPORTANT INSTRUCTIONS:
+- Translate the MEANING, not word-for-word literal translation
+- Do NOT transliterate to Devanagari script - translate directly to the target language
+- Preserve the tone and intent of the original text
+- Keep any intentionally-used English words in English if they fit naturally in the target language
+- Output ONLY the translation wrapped in <translation></translation> tags
+- Do not include headings, explanations, notes, or commentary of any kind, inside or outside the tags`;
+          
+          const userPrompt = payload.text;
+          const rawResponse = await callFreeLLMAPI(systemPrompt, userPrompt);
+          
+          // Extract content between <translation> tags (same logic as translateWithAI)
+          const trimmedContent = rawResponse.trim();
+          const tagMatch = rawResponse.match(/<translation>([\s\S]*?)<\/translation>/i);
+          const translatedText = tagMatch && tagMatch[1] ? tagMatch[1].trim() : trimmedContent;
+          
+          const result = {
+            translatedText,
+            detectedSourceLanguage: 'hi-Latn',
+            targetLanguage: target,
+            provider: 'freellm',
+            cached: false,
+            partOfSpeech: null,
+            definition: null,
+            synonyms: [],
+            antonyms: [],
+            exampleSentences: [],
+          };
+
+          await addDebugLog('hinglish-ai-translation-success', { 
+            translatedPreview: translatedText.substring(0, 100) 
+          });
+          logger.info('background', { action: 'hinglish-ai-translation-success' });
+
+          // Cache to disk
+          await setTranslationCacheEntry({ 
+            key: cacheKey, 
+            result, 
+            timestamp: Date.now(),
+            version: CACHE_VERSION 
+          });
+          await addQuotaWords(countWords(payload.text));
+
+          return { type: 'TRANSLATE_RESULT', payload: result };
+        } catch (aiError) {
+          await addDebugLog('hinglish-ai-failed', { 
+            error: aiError instanceof Error ? aiError.message : String(aiError) 
+          });
+          logger.error('background', { 
+            action: 'hinglish-ai-failed',
+            error: aiError instanceof Error ? aiError.message : String(aiError)
+          });
+          // Fall through to normal translation path if AI fails
+        }
+      } else {
+        // No API key for Hinglish translation
+        await addDebugLog('hinglish-no-api-key', { targetLanguage: target });
+        logger.warn('background', { action: 'hinglish-no-api-key' });
+        return { 
+          type: 'ERROR', 
+          payload: { 
+            code: 'MISSING_API_KEY', 
+            message: 'Hinglish translation requires an API key. Please add your FreeLLMAPI key in Settings to translate Hinglish text.' 
+          } 
+        };
+      }
+    }
+  }
+
   // Check disk cache (persists across service worker restarts)
   const diskCache = await getTranslationCache();
   const diskHit = diskCache.find((c) => c.key === cacheKey);
   if (diskHit) {
-    console.log('Translation found in disk cache, returning cached result');
-    await addDebugLog('disk-cache-hit', { cached: true });
-    return { type: 'TRANSLATE_RESULT', payload: { ...diskHit.result, cached: true } };
+    // Check cache version - invalidate if version mismatch or missing
+    if (diskHit.version === CACHE_VERSION) {
+      if (DEBUG) console.log('Translation found in disk cache, returning cached result');
+      await addDebugLog('disk-cache-hit', { cached: true });
+      return { type: 'TRANSLATE_RESULT', payload: { ...diskHit.result, cached: true } };
+    } else {
+      if (DEBUG) console.log('Cache entry version mismatch, re-translating', { 
+        cachedVersion: diskHit.version, 
+        currentVersion: CACHE_VERSION 
+      });
+    }
   }
 
   // Debounce: check if this request is already in-flight
@@ -199,94 +281,150 @@ async function handleTranslate(
   // Create new request promise
   const requestPromise = (async () => {
     let translationMethod = 'primary';
+    let result: import('@/types').TranslationResult;
+    
     try {
       // Use fallback provider for resilience
       const provider = createFallbackProvider();
-      let result = await provider.translate(
+      result = await provider.translate(
         { ...payload, sourceLanguage: requestedSource, targetLanguage: target },
         settings.myMemoryEmail || undefined,
         settings,
       );
-
-      // Check for silent failure (translation returns same/near-identical text)
-      console.log('Checking isSilentFailure for:', payload.text.substring(0, 50), '->', result.translatedText.substring(0, 50));
-      const silentFailure = isSilentFailure(payload.text, result.translatedText, target);
-      console.log('isSilentFailure result:', silentFailure);
-      await addDebugLog('silent-failure-check', { 
-        isSilentFailure: silentFailure,
-        originalPreview: payload.text.substring(0, 50),
-        translatedPreview: result.translatedText.substring(0, 50)
+    } catch (primaryError) {
+      // MyMemory failed - attempt AI fallback if API key is available
+      await addDebugLog('primary-provider-failed', { 
+        error: primaryError instanceof Error ? primaryError.message : String(primaryError),
+        hasApiKey: !!settings.freeLLMApiKey 
       });
-      if (silentFailure) {
-        logger.warn('background', { 
-          action: 'silent-failure-detected',
-          originalText: payload.text.substring(0, 100),
-          translatedText: result.translatedText.substring(0, 100),
-        });
-        
-        // Attempt AI fallback if user has FreeLLMAPI key configured
-        await addDebugLog('ai-fallback-check', { hasApiKey: !!settings.freeLLMApiKey });
-        if (settings.freeLLMApiKey) {
-          try {
-            await addDebugLog('ai-fallback-attempted', { targetLanguage: target });
-            logger.info('background', { action: 'attempting-ai-fallback' });
-            const aiTranslation = await translateWithAI(payload.text, target);
-            result = { ...result, translatedText: aiTranslation };
-            translationMethod = 'ai-fallback';
-            await addDebugLog('ai-fallback-success', { 
-              translatedPreview: aiTranslation.substring(0, 100) 
-            });
-            logger.info('background', { action: 'ai-fallback-success', method: translationMethod });
-          } catch (aiError) {
-            // Log AI fallback failure but still return the original (failed) translation
-            await addDebugLog('ai-fallback-failed', { 
-              error: aiError instanceof Error ? aiError.message : String(aiError) 
-            });
-            logger.warn('background', { 
-              action: 'ai-fallback-failed',
-              error: aiError instanceof Error ? aiError.message : String(aiError) 
-            });
-          }
-        } else {
-          await addDebugLog('ai-fallback-skipped', { reason: 'no-api-key' });
-        }
-      }
+      logger.warn('background', { 
+        action: 'primary-provider-failed',
+        error: primaryError instanceof Error ? primaryError.message : String(primaryError),
+      });
 
-      // Apply AI polish if enabled (only if not already using AI fallback)
-      if (settings.aiEnhancedTranslation && settings.freeLLMApiKey && translationMethod !== 'ai-fallback') {
+      if (settings.freeLLMApiKey) {
         try {
-          const polishedText = await polishTranslation(result.translatedText, target);
-          result = { ...result, translatedText: polishedText };
-        } catch (polishError) {
-          // Silently fall back to original translation if polish fails
+          await addDebugLog('ai-fallback-attempted', { 
+            targetLanguage: target,
+            reason: 'primary-provider-error'
+          });
+          logger.info('background', { action: 'attempting-ai-fallback', reason: 'primary-provider-error' });
+          const aiTranslation = await translateWithAI(payload.text, target);
+          result = {
+            translatedText: aiTranslation,
+            detectedSourceLanguage: requestedSource === 'auto' ? null : requestedSource,
+            targetLanguage: target,
+            provider: 'freellm',
+            cached: false,
+            partOfSpeech: null,
+            definition: null,
+            synonyms: [],
+            antonyms: [],
+            exampleSentences: [],
+          };
+          translationMethod = 'ai-fallback';
+          await addDebugLog('ai-fallback-success', { 
+            translatedPreview: aiTranslation.substring(0, 100) 
+          });
+          logger.info('background', { action: 'ai-fallback-success', method: translationMethod });
+        } catch (aiError) {
+          // AI fallback also failed - throw the original error
+          await addDebugLog('ai-fallback-failed', { 
+            error: aiError instanceof Error ? aiError.message : String(aiError) 
+          });
+          logger.error('background', { 
+            action: 'ai-fallback-failed',
+            error: aiError instanceof Error ? aiError.message : String(aiError)
+          });
+          throw primaryError; // Throw original error to show proper error to user
+        }
+      } else {
+        // No API key available - throw the original error
+        await addDebugLog('ai-fallback-skipped', { reason: 'no-api-key' });
+        throw primaryError;
+      }
+    }
+
+    // Check for silent failure (translation returns same/near-identical text)
+    if (DEBUG) console.log('Checking isSilentFailure for:', payload.text.substring(0, 50), '->', result.translatedText.substring(0, 50));
+    const silentFailure = isSilentFailure(payload.text, result.translatedText, target);
+    if (DEBUG) console.log('isSilentFailure result:', silentFailure);
+    await addDebugLog('silent-failure-check', { 
+      isSilentFailure: silentFailure,
+      originalPreview: payload.text.substring(0, 50),
+      translatedPreview: result.translatedText.substring(0, 50)
+    });
+    if (silentFailure) {
+      logger.warn('background', { 
+        action: 'silent-failure-detected',
+        originalText: payload.text.substring(0, 100),
+        translatedText: result.translatedText.substring(0, 100),
+      });
+      
+      // Attempt AI fallback if user has FreeLLMAPI key configured and not already using AI
+      if (settings.freeLLMApiKey && translationMethod !== 'ai-fallback') {
+        await addDebugLog('ai-fallback-check', { hasApiKey: !!settings.freeLLMApiKey });
+        try {
+          await addDebugLog('ai-fallback-attempted', { targetLanguage: target });
+          logger.info('background', { action: 'attempting-ai-fallback', reason: 'silent-failure' });
+          const aiTranslation = await translateWithAI(payload.text, target);
+          result = { ...result, translatedText: aiTranslation };
+          translationMethod = 'ai-fallback';
+          await addDebugLog('ai-fallback-success', { 
+            translatedPreview: aiTranslation.substring(0, 100) 
+          });
+          logger.info('background', { action: 'ai-fallback-success', method: translationMethod });
+        } catch (aiError) {
+          // Log AI fallback failure but still return the original (failed) translation
+          await addDebugLog('ai-fallback-failed', { 
+            error: aiError instanceof Error ? aiError.message : String(aiError) 
+          });
           logger.warn('background', { 
-            action: 'polish-failed', 
-            error: polishError instanceof Error ? polishError.message : String(polishError) 
+            action: 'ai-fallback-failed',
+            error: aiError instanceof Error ? aiError.message : String(aiError)
           });
         }
+      } else {
+        await addDebugLog('ai-fallback-skipped', { reason: translationMethod === 'ai-fallback' ? 'already-using-ai' : 'no-api-key' });
       }
-
-      // Log which translation method was used
-      logger.info('background', { 
-        action: 'translation-complete',
-        method: translationMethod,
-        targetLanguage: target,
-      });
-      await addDebugLog('translation-complete', { 
-        method: translationMethod,
-        targetLanguage: target,
-        translatedPreview: result.translatedText.substring(0, 100)
-      });
-
-      // Cache to disk (persists across restarts)
-      await setTranslationCacheEntry({ key: cacheKey, result, timestamp: Date.now() });
-      await addQuotaWords(countWords(payload.text));
-
-      return result;
-    } finally {
-      // Clean up in-flight cache after request completes
-      inFlightRequests.delete(cacheKey);
     }
+
+    // Apply AI polish if enabled (only if not already using AI fallback)
+    if (settings.aiEnhancedTranslation && settings.freeLLMApiKey && translationMethod !== 'ai-fallback') {
+      try {
+        const polishedText = await polishTranslation(result.translatedText, target);
+        result = { ...result, translatedText: polishedText };
+      } catch (polishError) {
+        // Silently fall back to original translation if polish fails
+        logger.warn('background', { 
+          action: 'polish-failed', 
+          error: polishError instanceof Error ? polishError.message : String(polishError) 
+        });
+      }
+    }
+
+    // Log which translation method was used
+    logger.info('background', { 
+      action: 'translation-complete',
+      method: translationMethod,
+      targetLanguage: target,
+    });
+    await addDebugLog('translation-complete', { 
+      method: translationMethod,
+      targetLanguage: target,
+      translatedPreview: result.translatedText.substring(0, 100)
+    });
+
+    // Cache to disk (persists across restarts)
+    await setTranslationCacheEntry({ 
+      key: cacheKey, 
+      result, 
+      timestamp: Date.now(),
+      version: CACHE_VERSION  // Include version when writing
+    });
+    await addQuotaWords(countWords(payload.text));
+
+    return result;
   })();
 
   inFlightRequests.set(cacheKey, requestPromise);
@@ -309,6 +447,9 @@ async function handleTranslate(
         message: error instanceof Error ? error.message : 'Translation failed.',
       },
     };
+  } finally {
+    // Clean up in-flight cache after request completes
+    inFlightRequests.delete(cacheKey);
   }
 }
 
@@ -390,10 +531,13 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
         ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
         : 'MISSING';
       logger.debug('ai-simplify', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
+      await addDebugLog('ai-simplify-handler-started', { textLength: message.payload.text.length });
       try {
         const result = await simplify(message.payload.text);
+        await addDebugLog('ai-simplify-handler-success', { resultPreview: result.substring(0, 100) });
         return { type: 'AI_SIMPLIFY_RESULT', payload: result };
       } catch (error) {
+        await addDebugLog('ai-simplify-handler-failed', { error: error instanceof Error ? error.message : String(error) });
         return handleAiError(error);
       }
     }
@@ -404,10 +548,13 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
         ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
         : 'MISSING';
       logger.debug('ai-correct-grammar', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
+      await addDebugLog('ai-correct-grammar-handler-started', { textLength: message.payload.text.length });
       try {
         const result = await correctGrammar(message.payload.text);
+        await addDebugLog('ai-correct-grammar-handler-success', { correctedPreview: result.corrected.substring(0, 100), changesCount: result.changes.length });
         return { type: 'AI_CORRECT_GRAMMAR_RESULT', payload: result };
       } catch (error) {
+        await addDebugLog('ai-correct-grammar-handler-failed', { error: error instanceof Error ? error.message : String(error) });
         return handleAiError(error);
       }
     }
@@ -418,10 +565,13 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
         ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
         : 'MISSING';
       logger.debug('ai-summarize', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
+      await addDebugLog('ai-summarize-handler-started', { textLength: message.payload.text.length });
       try {
         const result = await summarize(message.payload.text);
+        await addDebugLog('ai-summarize-handler-success', { resultPreview: result.substring(0, 100) });
         return { type: 'AI_SUMMARIZE_RESULT', payload: result };
       } catch (error) {
+        await addDebugLog('ai-summarize-handler-failed', { error: error instanceof Error ? error.message : String(error) });
         return handleAiError(error);
       }
     }
@@ -432,10 +582,13 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
         ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
         : 'MISSING';
       logger.debug('ai-rewrite', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
+      await addDebugLog('ai-rewrite-handler-started', { textLength: message.payload.text.length, tone: message.payload.tone });
       try {
         const result = await rewrite(message.payload.text, message.payload.tone);
+        await addDebugLog('ai-rewrite-handler-success', { resultPreview: result.substring(0, 100) });
         return { type: 'AI_REWRITE_RESULT', payload: result };
       } catch (error) {
+        await addDebugLog('ai-rewrite-handler-failed', { error: error instanceof Error ? error.message : String(error) });
         return handleAiError(error);
       }
     }

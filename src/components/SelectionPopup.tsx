@@ -20,6 +20,9 @@ import {
 import type { TranslationResult, UserSettings } from '@/types';
 import type { GrammarChange } from '@/lib/api/ai-features';
 
+// Debug flag - set to true for development troubleshooting
+const DEBUG = false;
+
 export interface SelectionPopupProps {
   selectedText: string;
   position: { top: number; left: number };
@@ -159,6 +162,7 @@ export function SelectionPopup({
   const [savedToVocab, setSavedToVocab] = useState(false);
   const [copiedToClipboard, setCopiedToClipboard] = useState(false);
   const selectedTextRef = useRef(selectedText);
+  const requestIdRef = useRef(0);
 
   // Only block when both dropdowns explicitly pick the same language.
   // "Auto-detect" must not be resolved to page language here — that caused
@@ -298,6 +302,7 @@ export function SelectionPopup({
   }, [sourceLang, targetLang, loadQuota]);
 
   const handleAiSimplify = useCallback(async () => {
+    const currentRequestId = ++requestIdRef.current;
     let textToProcess: string;
     if (view.status === 'success') {
       textToProcess = view.result.translatedText;
@@ -309,12 +314,15 @@ export function SelectionPopup({
     setView({ status: 'ai-loading', aiOperation: 'simplify' });
     try {
       const response = await fetchAiSimplify(textToProcess);
-      if (selectedTextRef.current !== textToProcess) {
+      if (DEBUG) console.log('[Simplify] Response received, checking request ID');
+      if (currentRequestId !== requestIdRef.current) {
+        if (DEBUG) console.log('[Simplify] Request ID mismatch, aborting');
         return;
       }
+      if (DEBUG) console.log('[Simplify] Setting ai-success state');
       setView({ status: 'ai-success', aiResult: response.payload, aiOperation: 'simplify' });
     } catch (error) {
-      if (selectedTextRef.current !== textToProcess) {
+      if (currentRequestId !== requestIdRef.current) {
         return;
       }
       if (error instanceof BackgroundError) {
@@ -332,6 +340,7 @@ export function SelectionPopup({
   }, [view]);
 
   const handleAiGrammar = useCallback(async () => {
+    const currentRequestId = ++requestIdRef.current;
     let textToProcess: string;
     if (view.status === 'success') {
       textToProcess = view.result.translatedText;
@@ -343,9 +352,12 @@ export function SelectionPopup({
     setView({ status: 'ai-loading', aiOperation: 'grammar' });
     try {
       const response = await fetchAiCorrectGrammar(textToProcess);
-      if (selectedTextRef.current !== textToProcess) {
+      if (DEBUG) console.log('[Grammar] Response received, checking request ID');
+      if (currentRequestId !== requestIdRef.current) {
+        if (DEBUG) console.log('[Grammar] Request ID mismatch, aborting');
         return;
       }
+      if (DEBUG) console.log('[Grammar] Setting ai-success state');
       const grammarResult = response.payload;
       setView({
         status: 'ai-success',
@@ -354,7 +366,7 @@ export function SelectionPopup({
         grammarChanges: grammarResult.changes
       });
     } catch (error) {
-      if (selectedTextRef.current !== textToProcess) {
+      if (currentRequestId !== requestIdRef.current) {
         return;
       }
       if (error instanceof BackgroundError) {
@@ -372,6 +384,7 @@ export function SelectionPopup({
   }, [view]);
 
   const handleAiSummarize = useCallback(async () => {
+    const currentRequestId = ++requestIdRef.current;
     let textToProcess: string;
     if (view.status === 'success') {
       textToProcess = view.result.translatedText;
@@ -383,12 +396,15 @@ export function SelectionPopup({
     setView({ status: 'ai-loading', aiOperation: 'summarize' });
     try {
       const response = await fetchAiSummarize(textToProcess);
-      if (selectedTextRef.current !== textToProcess) {
+      if (DEBUG) console.log('[Summarize] Response received, checking request ID');
+      if (currentRequestId !== requestIdRef.current) {
+        if (DEBUG) console.log('[Summarize] Request ID mismatch, aborting');
         return;
       }
+      if (DEBUG) console.log('[Summarize] Setting ai-success state');
       setView({ status: 'ai-success', aiResult: response.payload, aiOperation: 'summarize' });
     } catch (error) {
-      if (selectedTextRef.current !== textToProcess) {
+      if (currentRequestId !== requestIdRef.current) {
         return;
       }
       if (error instanceof BackgroundError) {
@@ -406,6 +422,7 @@ export function SelectionPopup({
   }, [view]);
 
   const handleAiRewrite = useCallback(async (tone: 'formal' | 'casual' | 'concise') => {
+    const currentRequestId = ++requestIdRef.current;
     let textToProcess: string;
     if (view.status === 'success') {
       textToProcess = view.result.translatedText;
@@ -417,12 +434,15 @@ export function SelectionPopup({
     setView({ status: 'ai-loading', aiOperation: `rewrite-${tone}` });
     try {
       const response = await fetchAiRewrite(textToProcess, tone);
-      if (selectedTextRef.current !== textToProcess) {
+      if (DEBUG) console.log('[Rewrite] Response received, checking request ID');
+      if (currentRequestId !== requestIdRef.current) {
+        if (DEBUG) console.log('[Rewrite] Request ID mismatch, aborting');
         return;
       }
+      if (DEBUG) console.log('[Rewrite] Setting ai-success state');
       setView({ status: 'ai-success', aiResult: response.payload, aiOperation: `rewrite-${tone}` });
     } catch (error) {
-      if (selectedTextRef.current !== textToProcess) {
+      if (currentRequestId !== requestIdRef.current) {
         return;
       }
       if (error instanceof BackgroundError) {

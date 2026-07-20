@@ -47,12 +47,25 @@ export async function saveSettings(partial: Partial<UserSettings>): Promise<User
   const current = await getSettings();
   const merged = { ...current, ...partial };
   const { myMemoryEmail, geminiApiKey, freeLLMApiKey, freeLLMBaseUrl, ...synced } = merged;
-  await setSync(STORAGE_KEYS.settingsSync, synced);
-  await setLocal(STORAGE_KEYS.myMemoryEmail, myMemoryEmail);
-  await setLocal(STORAGE_KEYS.geminiApiKey, geminiApiKey);
-  await setLocal(STORAGE_KEYS.freeLLMApiKey, freeLLMApiKey);
-  await setLocal(STORAGE_KEYS.freeLLMBaseUrl, freeLLMBaseUrl);
-  return merged;
+  
+  try {
+    await setSync(STORAGE_KEYS.settingsSync, synced);
+    await setLocal(STORAGE_KEYS.myMemoryEmail, myMemoryEmail);
+    await setLocal(STORAGE_KEYS.geminiApiKey, geminiApiKey);
+    await setLocal(STORAGE_KEYS.freeLLMApiKey, freeLLMApiKey);
+    await setLocal(STORAGE_KEYS.freeLLMBaseUrl, freeLLMBaseUrl);
+    
+    // Verify the save worked by reading back
+    const verifyFreeLLMKey = await getLocal<string>(STORAGE_KEYS.freeLLMApiKey);
+    if (freeLLMApiKey && verifyFreeLLMKey !== freeLLMApiKey) {
+      throw new Error(`FreeLLM API key verification failed: expected "${freeLLMApiKey.substring(0, 6)}..." but got "${verifyFreeLLMKey?.substring(0, 6)}..."`);
+    }
+    
+    return merged;
+  } catch (error) {
+    console.error('[Storage] saveSettings failed:', error);
+    throw error;
+  }
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {
@@ -83,6 +96,7 @@ export interface CacheEntry {
   key: string;
   result: import('@/types').TranslationResult;
   timestamp: number;
+  version?: string;  // Added version field for cache invalidation
 }
 
 export async function getTranslationCache(): Promise<CacheEntry[]> {

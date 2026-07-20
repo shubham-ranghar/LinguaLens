@@ -56,13 +56,22 @@ export function OptionsApp() {
     if (!settings) return;
     setError(null);
     try {
+      console.log('[Options] Saving settings:', { 
+        hasFreeLLMKey: !!settings.freeLLMApiKey, 
+        keyPreview: settings.freeLLMApiKey?.substring(0, 6) + '...' 
+      });
       const res = await updateSettings(settings);
+      console.log('[Options] Save successful, response:', { 
+        hasFreeLLMKey: !!res.payload.freeLLMApiKey,
+        keyPreview: res.payload.freeLLMApiKey?.substring(0, 6) + '...'
+      });
       setSettings(res.payload);
       setSaved(true);
       setHasChanges(false);
       // Show saved state briefly
       window.setTimeout(() => setSaved(false), 2000);
     } catch (err) {
+      console.error('[Options] Save failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     }
   };
