@@ -1,5 +1,5 @@
 import type { TranslationRequest, TranslationResult } from '@/types';
-import { isSingleWord, normalizeLanguageCode, resolveSourceLanguage } from '@/lib/utils';
+import { isSingleWord, normalizeLanguageCode } from '@/lib/utils';
 import { franc } from 'franc';
 import { logger } from '@/lib/logger';
 import { detectHinglish } from '@/lib/detection/hinglishDetector';
@@ -14,7 +14,6 @@ export const MIN_FRANC_DETECTION_LENGTH = 4;
 
 // Configuration constants for translation
 export const MYMEMORY_MAX_CHARS_PER_REQUEST = 500; // MyMemory free tier limit
-export const CHUNK_MIN_SENTENCES = 2; // Minimum sentences per chunk to avoid fragmentation
 
 /**
  * Normalize text for comparison by removing punctuation, extra whitespace, and case-folding.
@@ -1353,7 +1352,7 @@ export class MyMemoryTranslationProvider implements TranslationProvider {
     });
 
     // Apply post-processing to fix common translation quality issues
-    const postProcessedText = postProcessTranslation(translatedText, target, settings);
+    const postProcessedText = postProcessTranslation(translatedText, target);
     
     // Check translation quality for languages prone to literal translation
     const qualityCheck = checkTranslationQuality(postProcessedText, text, target);
@@ -1659,50 +1658,6 @@ async function fetchDictionaryEnrichment(
   }
 }
 
-/** Mock provider for development and tests. */
-export class MockTranslationProvider implements TranslationProvider {
-  readonly name = 'mock';
-
-  async translate(request: TranslationRequest): Promise<TranslationResult> {
-    await delay(300 + Math.random() * 400);
-
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      throw translationError('OFFLINE', 'You appear to be offline.');
-    }
-
-    const text = request.text.trim();
-    if (!text) {
-      throw translationError('INVALID_REQUEST', 'No text provided for translation.');
-    }
-
-    if (text.length > 5000) {
-      throw translationError('RATE_LIMITED', 'Text exceeds maximum length (5000 characters).');
-    }
-
-    const detected = resolveSourceLanguage(
-      request.sourceLanguage ?? 'auto',
-      request.pageLanguage,
-    );
-
-    return {
-      translatedText: `[${request.targetLanguage}] ${text}`,
-      detectedSourceLanguage: detected,
-      targetLanguage: request.targetLanguage,
-      provider: this.name,
-      cached: false,
-      partOfSpeech: null,
-      definition: null,
-      synonyms: [],
-      antonyms: [],
-      exampleSentences: [],
-    };
-  }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export function translationError(
   code: import('@/types').TranslationErrorCode,
   message: string,
@@ -1716,74 +1671,4 @@ export function isTranslationError(
   error: unknown,
 ): error is Error & { code: import('@/types').TranslationErrorCode } {
   return error instanceof Error && 'code' in error && typeof (error as { code: unknown }).code === 'string';
-}
-
-export const defaultTranslationProvider: TranslationProvider = new MyMemoryTranslationProvider();
-
-/**
- * Google Translate provider (requires API key).
- * Note: This is a placeholder - Google Translate API requires proper authentication.
- */
-export class GoogleTranslateProvider implements TranslationProvider {
-  readonly name = 'google';
-
-  async translate(_request: TranslationRequest, _myMemoryEmail?: string): Promise<TranslationResult> {
-    // Placeholder implementation - requires Google Cloud Translation API key
-    throw translationError('MISSING_API_KEY', 'Google Translate provider requires API key configuration.');
-  }
-}
-
-/**
- * Fallback chain provider that tries multiple providers in sequence.
- * If the primary provider fails, it falls back to secondary providers.
- */
-export class FallbackTranslationProvider implements TranslationProvider {
-  readonly name = 'fallback';
-  private providers: TranslationProvider[];
-
-  constructor(providers: TranslationProvider[]) {
-    if (providers.length === 0) {
-      throw new Error('Fallback provider requires at least one provider');
-    }
-    this.providers = providers;
-  }
-
-  async translate(request: TranslationRequest, myMemoryEmail?: string): Promise<TranslationResult> {
-    const errors: Error[] = [];
-
-    for (const provider of this.providers) {
-      try {
-        const result = await provider.translate(request, myMemoryEmail);
-        // Mark which provider succeeded
-        return { ...result, provider: `${provider.name} (via fallback)` };
-      } catch (error) {
-        if (isTranslationError(error)) {
-          errors.push(error);
-          // Retry with next provider on rate limit or API failure
-          if (error.code === 'RATE_LIMITED' || error.code === 'API_FAILURE') {
-            continue;
-          }
-          // Don't retry on client errors
-          throw error;
-        }
-        errors.push(error instanceof Error ? error : new Error(String(error)));
-      }
-    }
-
-    // All providers failed
-    throw translationError(
-      'API_FAILURE',
-      `All translation providers failed: ${errors.map(e => e.message).join(', ')}`,
-    );
-  }
-}
-
-/**
- * Create a fallback chain with MyMemory as primary.
- * Mock provider removed to prevent tagged text fallback in production.
- */
-export function createFallbackProvider(): TranslationProvider {
-  return new FallbackTranslationProvider([
-    new MyMemoryTranslationProvider(),
-  ]);
 }

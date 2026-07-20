@@ -627,7 +627,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
           // Increase polling frequency when activity detected (200ms)
           if (pollInterval !== 200) {
             pollInterval = 200;
-            window.clearInterval(pollingInterval);
+            if (pollingInterval !== null) window.clearInterval(pollingInterval);
             pollingInterval = window.setInterval(arguments.callee as () => void, pollInterval);
           }
         }
@@ -639,7 +639,7 @@ export function initContentScript(ctx: ContentScriptContext): void {
           activityDetected = false;
           if (pollInterval !== 2000) {
             pollInterval = 2000;
-            window.clearInterval(pollingInterval);
+            if (pollingInterval !== null) window.clearInterval(pollingInterval);
             pollingInterval = window.setInterval(arguments.callee as () => void, pollInterval);
           }
         }
@@ -687,28 +687,6 @@ export function initContentScript(ctx: ContentScriptContext): void {
   }
 
   // ============================================
-  // HANDLE USER-SELECT: NONE CSS RESTRICTIONS
-  // ============================================
-  
-  // This is a workaround for sites that set user-select: none
-  // Uncomment if needed for specific sites that block text selection
-  /*
-  function forceTextSelection(): void {
-    const style = document.createElement('style');
-    style.textContent = `
-      * {
-        -webkit-user-select: text !important;
-        -moz-user-select: text !important;
-        -ms-user-select: text !important;
-        user-select: text !important;
-      }
-    `;
-    document.head.appendChild(style);
-    logger.debug('Forced text selection via CSS');
-  }
-  */
-
-  // ============================================
   // INITIALIZATION
   // ============================================
   
@@ -726,11 +704,6 @@ export function initContentScript(ctx: ContentScriptContext): void {
 
   // Set up polling fallback for problematic sites
   setupPolling();
-
-  // Force text selection on sites that block it
-  // Commented out by default as it may break site functionality
-  // Uncomment if needed for specific sites
-  // forceTextSelection();
 
   // Handle URL changes via popstate event (for back/forward navigation)
   // SPA navigation is detected via MutationObserver on title changes

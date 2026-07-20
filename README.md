@@ -2,115 +2,145 @@
 
 A cross-browser Manifest V3 extension for instant translation, pronunciation, and language learning. Select any text on a webpage to translate it — built with **WXT**, **React**, **TypeScript**, and **Tailwind CSS**.
 
-## Why WXT?
+**Repository:** [github.com/shubham-ranghar/LinguaLens](https://github.com/shubham-ranghar/LinguaLens)
 
-[WXT](https://wxt.dev/) was chosen over raw Vite + `@crxjs/vite-plugin` because it provides:
+## Features
 
-- Built-in **multi-browser targets** (Chrome, Firefox, Safari conversion path)
-- **React module** with hot reload for popup/options/content UI
-- **Shadow DOM content script UI** helpers (`createShadowRootUi`)
-- Unified manifest generation from TypeScript (`manifest.config.ts`)
+- **Text selection detection** — floating translate button near your selection (or auto-translate)
+- **Translation popup** — Shadow DOM–isolated UI with source/target language controls
+- **MyMemory translation** — free API by default; optional email raises daily word quota
+- **Language detection** — auto-detect via `franc` plus heuristics (including Hinglish)
+- **Hinglish support** — romanized Hindi–English via Gemini and/or Devanagari transliteration
+- **Dictionary extras** — English definitions/synonyms via Free Dictionary API when available
+- **AI tools** (optional) — simplify, grammar, summarize, rewrite via FreeLLM proxy; Hinglish via Gemini
+- **AI-enhanced translation** — optional post-polish of translations (uses FreeLLM quota)
+- **Text-to-speech** — Web Speech API pronunciation for translations
+- **Vocabulary** — save words/phrases locally; review mode in the toolbar popup
+- **Translation history** — searchable local history with page URL and timestamp
+- **Quota awareness** — MyMemory usage status in the popup
+- **Settings** — languages, popup behavior, theme, MyMemory email, Gemini key, FreeLLM base URL, debug logs
+- **Keyboard shortcut** — `Ctrl+Shift+L` / `⌘+Shift+L` to translate the current selection
 
-## Features (Phase 1 MVP)
+### Supported languages
 
-- **Text selection detection** — floating 🌐 button appears near your selection
-- **Translation popup** — Shadow DOM-isolated UI with source/target language controls
-- **Text-to-speech** — Web Speech API pronunciation (swappable for cloud TTS later)
-- **Settings page** — default languages, popup behavior, theme, API key/proxy config
-- **Translation history** — searchable local history in the toolbar popup
-- **Keyboard shortcut** — `Ctrl+Shift+L` / `⌘+Shift+L` to translate selection
+Auto-detect, English, Spanish, French, German, Italian, Portuguese, Japanese, Korean, Chinese, Russian, Arabic, Hindi, Dutch, Polish, Turkish, Vietnamese.
 
-Phase 2/3 UI slots (Save to vocabulary, Simplify, Grammar, etc.) are stubbed and disabled.
+## Stack
+
+| Piece | Choice |
+|-------|--------|
+| Extension framework | [WXT](https://wxt.dev/) (Chrome / Firefox MV3) |
+| UI | React 19 + Tailwind CSS 4 |
+| Language detection | `franc` |
+| Translation | [MyMemory](https://mymemory.translated.net/) |
+| Optional AI | FreeLLM proxy + [Google Gemini](https://aistudio.google.com) |
+| Tests | Vitest |
 
 ## Project structure
 
 ```
 src/
-  background/        Service worker logic (API, messaging, cache)
-  content/           Selection detection + Shadow DOM mount
-  popup/             Toolbar popup React app
-  options/           Settings page React app
-  components/        Shared UI (SelectionPopup, buttons, cards)
+  background/          Service worker (messaging, cache, quota, translate)
+  content/             Selection detection + Shadow DOM mount
+  popup/               Toolbar popup (history, vocabulary, review, quota)
+  options/             Settings page
+  components/          SelectionPopup + shared UI
   lib/
-    api/             TranslationProvider interface + mock impl
-    storage/         chrome.storage wrappers
-    i18n/            Extension UI strings
-  types/             Shared types + typed message contract
-  entrypoints/       WXT entry files
-  assets/            Tailwind CSS
-manifest.config.ts   MV3 manifest definition
-wxt.config.ts        WXT build config
+    api/               MyMemory provider, AI features, post-processing
+    detection/         Hinglish detection
+    transliteration/   Hinglish → Devanagari
+    storage/           chrome.storage wrappers
+    i18n/              Extension UI strings
+    messaging.ts       Typed popup/content ↔ background messages
+  types/               Shared types + message contracts
+  entrypoints/         WXT entry files (background, content, popup, options)
+  assets/              Tailwind CSS
+public/                Icons
+manifest.config.ts     MV3 manifest
+wxt.config.ts          WXT + Vite config
 ```
 
-## Permissions tradeoff
+## Permissions
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| **`activeTab` only** | Minimal permission prompt | Selection UI only works after user invokes extension on that tab |
-| **`https://*/*` content script** (current) | Always-on selection UX | Requires host access to HTTP(S) pages |
+| Permission | Why |
+|------------|-----|
+| `storage` | Settings, history, vocabulary, cache, API keys |
+| `activeTab` | Shortcut / action targeting the current tab |
+| `scripting` | Page UI injection support |
+| `http(s)://*/*` host | Always-on selection UI on web pages |
 
-LinguaLens uses `storage`, `activeTab`, `scripting`, and content scripts on `https://*/*` + `http://*/*` so the floating translate button works immediately on any page. API keys are stored in `chrome.storage.local` (not synced); other settings use `chrome.storage.sync`.
+API keys and MyMemory email stay in `chrome.storage.local` (not synced). Non-sensitive settings use `chrome.storage.sync`.
 
 ## Development
 
 ### Prerequisites
 
 - Node.js 18+
-- npm (or pnpm/yarn)
+- npm
 
 ### Install & run
 
 ```bash
 npm install
-npm run dev
+npm run dev          # Chrome
+npm run dev:firefox  # Firefox
 ```
 
-WXT opens a browser with the extension loaded. Output is in `.output/chrome-mv3/`.
+WXT loads the extension in a browser. Output: `.output/chrome-mv3/` (or Firefox equivalent).
 
-### Build for production
+### Build
 
 ```bash
-npm run build
+npm run build          # Chrome MV3 → .output/chrome-mv3/
+npm run build:firefox
+npm run zip            # Packaged zip for store upload
+npm run compile        # Typecheck only
 ```
 
-Load the unpacked extension from `.output/chrome-mv3/`.
+### Tests
 
-## Load unpacked in Chrome / Brave
+```bash
+npx vitest
+```
 
-1. Run `npm run build` (or use `.output/chrome-mv3` from `npm run dev`)
+### Load unpacked (Chrome / Brave)
+
+1. `npm run build`
 2. Open `chrome://extensions` (Brave: `brave://extensions`)
-3. Enable **Developer mode**
-4. Click **Load unpacked**
-5. Select the `.output/chrome-mv3` folder
+3. Enable **Developer mode** → **Load unpacked**
+4. Select `.output/chrome-mv3`
 
-### Pin the extension
+Pin LinguaLens from the puzzle menu for quick access to history and vocabulary.
 
-Click the puzzle icon → pin **LinguaLens** for quick access to history.
+## Configuration
 
-## Wire up a real translation API
+Open **Options** (right-click the extension icon → Options):
 
-The default provider is a **mock** in `src/lib/api/translation.ts`. To integrate your provider:
+| Setting | Purpose |
+|---------|---------|
+| Source / target language | Defaults for the selection popup |
+| Popup behavior | Click floating icon, or auto-translate on select |
+| Theme | System / light / dark |
+| MyMemory email | Optional — higher free daily word limit |
+| Hinglish mode | Auto / Gemini / transliteration |
+| AI-enhanced translation | Optional polish via FreeLLM |
+| FreeLLM base URL | Defaults to the LinguaLens proxy |
+| Gemini API key | Best-quality Hinglish (stored locally) |
 
-1. Implement `TranslationProvider` interface
-2. Replace `defaultTranslationProvider` in the same file (or select by settings)
-3. Add your API key in **Settings → Translation API**, or configure a backend proxy URL
-
-Never commit API keys. Prefer a server-side proxy so keys stay off the client.
+Never commit API keys. Prefer user-supplied keys or a server-side proxy.
 
 ## Keyboard shortcut
 
 Default: `Ctrl+Shift+L` (Mac: `⌘+Shift+L`). Customize at `chrome://extensions/shortcuts`.
 
-## Safari conversion
-
-See [SAFARI.md](./SAFARI.md) for Xcode conversion steps and known MV3 gaps.
-
 ## Privacy
 
+See [PRIVACY.md](./PRIVACY.md).
+
 - No analytics by default
-- History and vocabulary stay local
-- Selected text is sent only to your configured translation provider
-- Third-party APIs may log requests per their own policies
+- History and vocabulary stay on device
+- Selected text is sent only to configured translation/AI providers (MyMemory, optional Gemini / FreeLLM)
+- Privacy policy: https://github.com/shubham-ranghar/LinguaLens/blob/main/PRIVACY.md
 
 ## License
 

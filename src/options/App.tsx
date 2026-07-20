@@ -23,7 +23,6 @@ export function OptionsApp() {
     geminiApiKey: '',
     maxHistoryItems: 100,
     hinglishTranslationMode: 'auto',
-    freeLLMApiKey: '',
     freeLLMBaseUrl: '',
     aiEnhancedTranslation: false,
   });
@@ -42,7 +41,7 @@ export function OptionsApp() {
     
     // Load debug logs
     chrome.storage.local.get('debugLogs').then((result) => {
-      setDebugLogs(result.debugLogs || []);
+      setDebugLogs((result.debugLogs as unknown[]) || []);
     });
 
     // Load version from manifest
@@ -81,7 +80,7 @@ export function OptionsApp() {
 
   const handleViewLogs = () => {
     chrome.storage.local.get('debugLogs').then((result) => {
-      setDebugLogs(result.debugLogs || []);
+      setDebugLogs((result.debugLogs as unknown[]) || []);
       setShowLogs(true);
     });
   };

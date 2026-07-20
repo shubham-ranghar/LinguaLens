@@ -10,9 +10,6 @@ export interface UserSettings {
   geminiApiKey: string;
   maxHistoryItems: number;
   hinglishTranslationMode: 'auto' | 'gemini' | 'transliteration';
-  preferNativeWords?: boolean;
-  defaultHindiFormality?: 'aap' | 'tum' | 'tu';
-  freeLLMApiKey?: string;
   freeLLMBaseUrl?: string;
   aiEnhancedTranslation?: boolean;
 }

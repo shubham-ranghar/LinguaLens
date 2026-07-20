@@ -692,13 +692,13 @@ export function applySpanishIdiomOverrides(text: string): string {
  * 
  * @param text - The translated text from MyMemory API
  * @param targetLang - The target language code
- * @param settings - Optional user settings (e.g., preferNativeWords for Hindi)
+ * @param settings - Optional settings (e.g., preferNativeWords for Hindi)
  * @returns The post-processed translation text
  */
 export function postProcessTranslation(
   text: string,
   targetLang: string,
-  settings?: { preferNativeWords?: boolean; defaultHindiFormality?: 'aap' | 'tum' | 'tu' }
+  settings?: { preferNativeWords?: boolean }
 ): string {
   let processed = text;
   

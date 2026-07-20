@@ -62,16 +62,6 @@ export function Select({ label, className = '', children, ...props }: SelectProp
   );
 }
 
-export function Card({
-  children,
-  className = '',
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return <div className={`ll-card shadow-md ${className}`}>{children}</div>;
-}
-
 export function ErrorBanner({ message }: { message: string }) {
   return (
     <div className="ll-banner ll-banner--error ll-animate-slide-up">
@@ -96,16 +86,9 @@ export function LoadingSpinner({ message = 'Loading…' }: { message?: string })
 export function ThemeWrapper({
   children,
 }: {
+  /** Accepted for call-site compatibility; theme is applied via initTheme elsewhere. */
   theme?: 'light' | 'dark' | 'system';
   children: React.ReactNode;
 }) {
   return <div className="ll-root min-h-full">{children}</div>;
-}
-
-export function PhaseStubButton({ label }: { label: string }) {
-  return (
-    <Button variant="ghost" size="sm" disabled title="Coming in a future phase">
-      {label}
-    </Button>
-  );
 }

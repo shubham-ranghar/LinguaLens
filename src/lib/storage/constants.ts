@@ -9,7 +9,6 @@ export const DEFAULT_SETTINGS: UserSettings = {
   geminiApiKey: '',
   maxHistoryItems: 100,
   hinglishTranslationMode: 'auto',
-  freeLLMApiKey: '',
   freeLLMBaseUrl: 'https://lingualens-proxy.onrender.com',
 };
 
@@ -21,7 +20,6 @@ export const STORAGE_KEYS = {
   geminiApiKey: 'lingualens_gemini_api_key',
   quotaUsage: 'lingualens_quota_usage',
   vocabularyLocal: 'lingualens_vocabulary',
-  freeLLMApiKey: 'lingualens_freellm_api_key',
   freeLLMBaseUrl: 'lingualens_freellm_base_url',
 } as const;
 

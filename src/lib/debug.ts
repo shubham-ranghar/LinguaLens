@@ -24,25 +24,3 @@ export async function addDebugLog(event: string, data: Record<string, unknown>):
     console.error('Failed to write debug log:', error);
   }
 }
-
-export async function getDebugLogs(): Promise<DebugLogEntry[]> {
-  try {
-    const result = await chrome.storage.local.get('debugLogs') as { debugLogs?: DebugLogEntry[] };
-    return result.debugLogs || [];
-  } catch (error) {
-    console.error('Failed to read debug logs:', error);
-    return [];
-  }
-}
-
-export async function printDebugLogs(): Promise<void> {
-  const logs = await getDebugLogs();
-  console.table(logs);
-  console.log('Last 20 log entries:');
-  console.table(logs.slice(-20));
-}
-
-export async function clearDebugLogs(): Promise<void> {
-  await chrome.storage.local.remove('debugLogs');
-  console.log('Debug logs cleared');
-}

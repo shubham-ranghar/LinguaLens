@@ -22,15 +22,14 @@ function setLocal<T>(key: string, value: T): Promise<void> {
   return chrome.storage.local.set({ [key]: value });
 }
 
-/** Settings synced across devices (excludes email and API key used for quota). */
-type SyncedSettings = Omit<UserSettings, 'myMemoryEmail' | 'geminiApiKey' | 'freeLLMApiKey' | 'freeLLMBaseUrl'>;
+/** Settings synced across devices (excludes secrets and FreeLLM base URL). */
+type SyncedSettings = Omit<UserSettings, 'myMemoryEmail' | 'geminiApiKey' | 'freeLLMBaseUrl'>;
 
 export async function getSettings(): Promise<UserSettings> {
-  const [stored, myMemoryEmail, geminiApiKey, freeLLMApiKey, freeLLMBaseUrl] = await Promise.all([
+  const [stored, myMemoryEmail, geminiApiKey, freeLLMBaseUrl] = await Promise.all([
     getSync<Partial<SyncedSettings>>(STORAGE_KEYS.settingsSync),
     getLocal<string>(STORAGE_KEYS.myMemoryEmail),
     getLocal<string>(STORAGE_KEYS.geminiApiKey),
-    getLocal<string>(STORAGE_KEYS.freeLLMApiKey),
     getLocal<string>(STORAGE_KEYS.freeLLMBaseUrl),
   ]);
   return {
@@ -38,7 +37,6 @@ export async function getSettings(): Promise<UserSettings> {
     ...stored,
     myMemoryEmail: myMemoryEmail ?? '',
     geminiApiKey: geminiApiKey ?? '',
-    freeLLMApiKey: freeLLMApiKey ?? '',
     freeLLMBaseUrl: freeLLMBaseUrl ?? '',
   };
 }
@@ -46,14 +44,13 @@ export async function getSettings(): Promise<UserSettings> {
 export async function saveSettings(partial: Partial<UserSettings>): Promise<UserSettings> {
   const current = await getSettings();
   const merged = { ...current, ...partial };
-  const { myMemoryEmail, geminiApiKey, freeLLMApiKey, freeLLMBaseUrl, ...synced } = merged;
+  const { myMemoryEmail, geminiApiKey, freeLLMBaseUrl, ...synced } = merged;
   
   try {
     await setSync(STORAGE_KEYS.settingsSync, synced);
     await setLocal(STORAGE_KEYS.myMemoryEmail, myMemoryEmail);
     await setLocal(STORAGE_KEYS.geminiApiKey, geminiApiKey);
-    await setLocal(STORAGE_KEYS.freeLLMApiKey, freeLLMApiKey);
-    await setLocal(STORAGE_KEYS.freeLLMBaseUrl, freeLLMBaseUrl);
+    await setLocal(STORAGE_KEYS.freeLLMBaseUrl, freeLLMBaseUrl ?? '');
     
     return merged;
   } catch (error) {

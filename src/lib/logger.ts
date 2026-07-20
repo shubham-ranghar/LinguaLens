@@ -47,43 +47,14 @@ function addToBuffer(entry: LogEntry): void {
 }
 
 /**
- * Get the current log buffer
- */
-export function getLogBuffer(): LogEntry[] {
-  return [...logBuffer];
-}
-
-/**
- * Clear the log buffer
- */
-export function clearLogBuffer(): void {
-  logBuffer.length = 0;
-}
-
-/**
- * Export logs as JSON string for debugging
- */
-export function exportLogs(): string {
-  return JSON.stringify(logBuffer, null, 2);
-}
-
-/**
  * Safe logging function that works even when extension context is invalidated
  * Falls back to console directly if chrome.runtime is not available
  */
 function safeLog(level: 'log' | 'info' | 'warn' | 'error', ...args: unknown[]) {
   try {
-    // Check if we're in a valid extension context
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) {
-      // Extension context is valid, use console normally
-      console[level](...args);
-    } else {
-      // Extension context might be invalidated, still try to log to console
-      console[level](...args);
-    }
-  } catch (e) {
+    console[level](...args);
+  } catch {
     // If logging fails, silently fail to avoid breaking the extension
-    // This can happen if the console is not available or context is completely broken
   }
 }
 
@@ -155,14 +126,6 @@ export const logger = {
     safeLog('error', `[ERROR][${category}]`, data);
   },
   
-  // Legacy convenience methods for backward compatibility
-  languageDetection: (...args: unknown[]) => {
-    logger.debug('language-detection', {
-      message: args.length > 0 ? String(args[0]) : '',
-      details: args.slice(1),
-    });
-  },
-  
   apiDebug: (...args: unknown[]) => {
     logger.debug('api', {
       message: args.length > 0 ? String(args[0]) : '',
@@ -191,57 +154,3 @@ export const logger = {
     });
   },
 };
-
-/**
- * Toggle debug mode in chrome.storage
- */
-export async function setDebugMode(enabled: boolean): Promise<void> {
-  if (typeof chrome !== 'undefined' && chrome.storage) {
-    await chrome.storage.local.set({ debugMode: enabled });
-  }
-}
-
-/**
- * Get current debug mode status
- */
-export async function getDebugMode(): Promise<boolean> {
-  return isDebugEnabled();
-}
-
-/**
- * Check if extension context is valid
- * Returns true if chrome.runtime is available and has an ID
- */
-export function isExtensionContextValid(): boolean {
-  try {
-    return typeof chrome !== 'undefined' && 
-           chrome.runtime !== null && 
-           chrome.runtime.id !== undefined;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Safe wrapper for chrome.runtime.sendMessage that handles context invalidation
- */
-export function safeSendMessage<T>(message: T): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (!isExtensionContextValid()) {
-      reject(new Error('Extension context invalidated'));
-      return;
-    }
-    
-    try {
-      chrome.runtime.sendMessage(message, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve(response);
-        }
-      });
-    } catch (e) {
-      reject(e);
-    }
-  });
-}

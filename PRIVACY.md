@@ -106,4 +106,4 @@ We may update this privacy policy from time to time. We will notify users of sig
 
 ## Contact
 
-If you have questions about this privacy policy or how we handle your data, please contact us through the GitHub repository: https://github.com/shubham-ranghar/LinguaLens-/issues
+If you have questions about this privacy policy or how we handle your data, please contact us through the GitHub repository: https://github.com/shubham-ranghar/LinguaLens/issues

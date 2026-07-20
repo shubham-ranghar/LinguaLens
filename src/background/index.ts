@@ -1,5 +1,5 @@
 import {
-  createFallbackProvider,
+  MyMemoryTranslationProvider,
   isTranslationError,
 } from '@/lib/api/translation';
 import { correctGrammar, polishTranslation, rewrite, simplify, summarize, translateWithAI, callFreeLLMAPI, getLanguageName } from '@/lib/api/ai-features';
@@ -18,7 +18,7 @@ import {
   searchVocabulary,
   setTranslationCacheEntry,
 } from '@/lib/storage';
-import { addDebugLog, type DebugLogEntry } from '@/lib/debug';
+import { addDebugLog } from '@/lib/debug';
 import { resolveSourceLanguage } from '@/lib/utils';
 import type { BackgroundRequest, BackgroundResponse } from '@/types/messages';
 import { logger } from '@/lib/logger';
@@ -268,8 +268,8 @@ IMPORTANT INSTRUCTIONS:
     let result: import('@/types').TranslationResult;
     
     try {
-      // Use fallback provider for resilience
-      const provider = createFallbackProvider();
+      // Use MyMemory as the primary translation provider
+      const provider = new MyMemoryTranslationProvider();
       result = await provider.translate(
         { ...payload, sourceLanguage: requestedSource, targetLanguage: target },
         settings.myMemoryEmail || undefined,
@@ -581,30 +581,6 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
       },
     };
   }
-}
-
-// DEBUG FUNCTION: Call this from service worker console to clear ALL stored settings
-// Usage: await clearAllStorage()
-export async function clearAllStorage(): Promise<void> {
-  await chrome.storage.local.clear();
-  logger.debug('storage', { action: 'cleared-all' });
-}
-
-// DEBUG FUNCTION: View debug logs from service worker console
-// Usage: await viewDebugLogs()
-export async function viewDebugLogs(): Promise<void> {
-  const result = await chrome.storage.local.get('debugLogs') as { debugLogs?: DebugLogEntry[] };
-  const logs = result.debugLogs || [];
-  console.table(logs);
-  console.log('Last 20 log entries:');
-  console.table(logs.slice(-20));
-}
-
-// DEBUG FUNCTION: Clear debug logs
-// Usage: await clearDebugLogs()
-export async function clearDebugLogs(): Promise<void> {
-  await chrome.storage.local.remove('debugLogs');
-  console.log('Debug logs cleared');
 }
 
 export function initBackground(): void {

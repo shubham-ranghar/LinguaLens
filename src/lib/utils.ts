@@ -51,8 +51,8 @@ export function isSingleWord(text: string): boolean {
   return /^\p{L}+(?:[-']\p{L}+)*$/u.test(trimmed);
 }
 
-// Re-export theme functions from theme.ts for backward compatibility
-export { applyThemeToRoot, initTheme, resolveTheme, watchSystemTheme } from './theme';
+// Re-export theme helpers used by popup/options/content
+export { applyThemeToRoot, initTheme, resolveTheme } from './theme';
 
 export function speakText(text: string, lang: string): void {
   if (!('speechSynthesis' in window)) {

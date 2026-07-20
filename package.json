@@ -7,12 +7,11 @@
   "scripts": {
     "dev": "cross-env JITI_CACHE=false wxt",
     "dev:firefox": "cross-env JITI_CACHE=false wxt -b firefox",
-    "build": "cross-env JITI_CACHE=false wxt build && node -e \"const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync('.output/chrome-mv3/manifest.json','utf8')); manifest.options_ui.open_in_tab=true; fs.writeFileSync('.output/chrome-mv3/manifest.json',JSON.stringify(manifest,null,2));\"",
+    "build": "cross-env JITI_CACHE=false wxt build",
     "build:firefox": "cross-env JITI_CACHE=false wxt build -b firefox",
     "zip": "cross-env JITI_CACHE=false wxt zip",
     "compile": "tsc --noEmit",
-    "postinstall": "wxt prepare",
-    "postbuild": "rimraf .output.old || exit 0"
+    "postinstall": "wxt prepare"
   },
   "dependencies": {
     "@wxt-dev/module-react": "^1.2.2",
@@ -26,14 +25,8 @@
     "@types/chrome": "^0.2.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitest/ui": "^4.1.10",
-    "autoprefixer": "^10.5.2",
     "cross-env": "^10.1.0",
-    "jimp": "^1.6.1",
     "jsdom": "^29.1.1",
-    "postcss": "^8.5.16",
-    "rimraf": "^6.1.3",
-    "sharp": "^0.35.3",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
