@@ -97,6 +97,25 @@ function CopyIcon() {
   );
 }
 
+function ChevronDownIcon({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
 function errorMessageFromCode(code: string, fallback: string): string {
   const map: Record<string, string> = {
     OFFLINE: t('offline'),
@@ -161,6 +180,7 @@ export function SelectionPopup({
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [savedToVocab, setSavedToVocab] = useState(false);
   const [copiedToClipboard, setCopiedToClipboard] = useState(false);
+  const [aiSectionCollapsed, setAiSectionCollapsed] = useState(true);
   const selectedTextRef = useRef(selectedText);
   const requestIdRef = useRef(0);
 
@@ -712,51 +732,68 @@ export function SelectionPopup({
             </div>
 
             <div className="ll-selection-popup__ai">
-              <p className="ll-micro-label ll-selection-popup__ai-label">AI</p>
-              <Button
-                variant="ai"
-                size="sm"
-                disabled={view.status === 'ai-loading' && view.aiOperation === 'simplify'}
+              <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  void handleAiSimplify();
+                  setAiSectionCollapsed(!aiSectionCollapsed);
                 }}
+                className="ll-micro-label ll-selection-popup__ai-label ll-focus-ring flex items-center gap-1 cursor-pointer hover:text-accent transition-colors"
+                aria-expanded={!aiSectionCollapsed}
               >
-                {t('simplify')}
-              </Button>
-              <Button
-                variant="ai"
-                size="sm"
-                disabled={view.status === 'ai-loading' && view.aiOperation === 'grammar'}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void handleAiGrammar();
-                }}
-              >
-                {t('grammar')}
-              </Button>
-              <Button
-                variant="ai"
-                size="sm"
-                disabled={view.status === 'ai-loading' && view.aiOperation === 'summarize'}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void handleAiSummarize();
-                }}
-              >
-                {t('summarize')}
-              </Button>
-              <Button
-                variant="ai"
-                size="sm"
-                disabled={view.status === 'ai-loading' && view.aiOperation === 'rewrite-formal'}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void handleAiRewrite('formal');
-                }}
-              >
-                {t('rewrite')}
-              </Button>
+                AI
+                <span className={`transition-transform duration-200 ${aiSectionCollapsed ? 'rotate-0' : 'rotate-180'}`}>
+                  <ChevronDownIcon size={14} />
+                </span>
+              </button>
+              <div className={`overflow-hidden transition-all duration-200 ease-in-out ${aiSectionCollapsed ? 'max-h-0 opacity-0' : 'max-h-32 opacity-100'}`}>
+                <div className="pt-2 space-y-2">
+                  <Button
+                    variant="ai"
+                    size="sm"
+                    disabled={view.status === 'ai-loading' && view.aiOperation === 'simplify'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleAiSimplify();
+                    }}
+                  >
+                    {t('simplify')}
+                  </Button>
+                  <Button
+                    variant="ai"
+                    size="sm"
+                    disabled={view.status === 'ai-loading' && view.aiOperation === 'grammar'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleAiGrammar();
+                    }}
+                  >
+                    {t('grammar')}
+                  </Button>
+                  <Button
+                    variant="ai"
+                    size="sm"
+                    disabled={view.status === 'ai-loading' && view.aiOperation === 'summarize'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleAiSummarize();
+                    }}
+                  >
+                    {t('summarize')}
+                  </Button>
+                  <Button
+                    variant="ai"
+                    size="sm"
+                    disabled={view.status === 'ai-loading' && view.aiOperation === 'rewrite-formal'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleAiRewrite('formal');
+                    }}
+                  >
+                    {t('rewrite')}
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

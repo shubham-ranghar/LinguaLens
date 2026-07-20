@@ -255,7 +255,7 @@
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: var(--color-text-disabled);
+    color: #D4D4D8;
   }
 
   /* Shared surfaces — fully opaque */
@@ -728,16 +728,25 @@
 
   /* Settings button styles */
   .ll-btn--settings {
-    background-color: #6c6c6c;
-    border: 1px solid var(--color-border);
-    color: var(--color-text);
+    background-color: var(--color-accent);
+    border: 1px solid var(--color-accent);
+    color: var(--color-on-accent);
     border-radius: var(--radius-md);
     font-weight: 500;
+    cursor: pointer;
   }
 
   .ll-btn--settings:hover:not(:disabled) {
-    background-color: #6c6c6c;
+    background-color: var(--color-accent-hover);
+    border-color: var(--color-accent-hover);
+  }
+
+  .ll-btn--settings:disabled {
+    background-color: var(--color-text-disabled);
     border-color: var(--color-border);
+    color: var(--color-text);
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   .ll-field-label {
@@ -1010,15 +1019,16 @@
   }
 
   .ll-empty-state-icon {
-    font-size: 32px;
+    font-size: 48px;
     margin-bottom: var(--spacing-3);
-    opacity: 0.45;
+    opacity: 0.5;
   }
 
   .ll-empty-state-text {
     font-size: var(--text-base);
-    margin-bottom: var(--spacing-2);
+    margin-bottom: 6px;
     color: var(--color-text);
+    font-weight: 500;
   }
 
   .ll-empty-state-action {
@@ -1270,10 +1280,10 @@
   .ll-selection-popup__body {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-3);
+    gap: 10px;
     flex: 1;
     min-height: 0;
-    padding: 14px 12px 14px 14px;
+    padding: 12px 12px 12px 14px;
     background-color: var(--color-surface);
     overflow-y: auto;
     overflow-x: hidden;

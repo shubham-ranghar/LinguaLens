@@ -130,22 +130,9 @@ export function initContentScript(ctx: ContentScriptContext): void {
   }
 
   function getTriggerPosition(rect: DOMRect): { top: number; left: number } {
-    // Account for scroll position
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-    
-    // Account for zoom level
-    const zoomLevel = window.devicePixelRatio || 1;
-    const adjustedRect = {
-      top: rect.top / zoomLevel,
-      right: rect.right / zoomLevel,
-      left: rect.left / zoomLevel,
-      bottom: rect.bottom / zoomLevel,
-    };
-    
     return {
-      top: Math.max(8, adjustedRect.top + scrollTop - 44),
-      left: Math.min(adjustedRect.right + scrollLeft + 4, window.innerWidth - 44),
+      top: Math.max(8, rect.top - 44),
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 44)),
     };
   }
 
@@ -153,37 +140,22 @@ export function initContentScript(ctx: ContentScriptContext): void {
     const popupWidth = 360;
     const popupHeight = 320;
     
-    // Account for scroll position
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
     
-    // Account for zoom level
-    const zoomLevel = window.devicePixelRatio || 1;
-    const adjustedRect = {
-      top: rect.top / zoomLevel,
-      right: rect.right / zoomLevel,
-      left: rect.left / zoomLevel,
-      bottom: rect.bottom / zoomLevel,
-    };
-    
-    const spaceBelow = window.innerHeight - adjustedRect.bottom - 8;
-    const spaceAbove = adjustedRect.top - 8;
-    
-    // If there's not enough space below but enough above, position above the selection
     let top;
     if (spaceBelow < popupHeight && spaceAbove > popupHeight) {
-      top = Math.max(8, adjustedRect.top + scrollTop - popupHeight - 8);
+      top = Math.max(8, rect.top - popupHeight - 8);
     } else {
-      top = Math.max(8, Math.min(adjustedRect.bottom + scrollTop + 8, window.innerHeight + scrollTop - popupHeight - 8));
+      top = Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - popupHeight - 8));
     }
     
-    // Ensure popup doesn't overflow horizontally
-    let left = adjustedRect.left + scrollLeft;
-    if (left + popupWidth > window.innerWidth + scrollLeft) {
-      left = window.innerWidth + scrollLeft - popupWidth - 8;
+    let left = rect.left;
+    if (left + popupWidth > window.innerWidth) {
+      left = window.innerWidth - popupWidth - 8;
     }
-    if (left < scrollLeft + 8) {
-      left = scrollLeft + 8;
+    if (left < 8) {
+      left = 8;
     }
     
     return { top, left };

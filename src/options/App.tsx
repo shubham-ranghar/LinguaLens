@@ -366,7 +366,11 @@ export function OptionsApp() {
             <span className="ll-settings-footer__status">
               {saved ? 'All changes saved' : hasChanges ? 'Unsaved changes' : 'No changes'}
             </span>
-            <Button variant="settings" onClick={() => void handleSave()}>
+            <Button 
+              variant="settings" 
+              disabled={!hasChanges}
+              onClick={() => void handleSave()}
+            >
               Save changes
             </Button>
           </div>
