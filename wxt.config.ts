@@ -1,13 +1,15 @@
 import tailwindcss from '@tailwindcss/vite';
+import { loadEnv } from 'vite';
 import { defineConfig, type WxtViteConfig } from 'wxt';
 import { defineLinguaLensManifest } from './manifest.config';
 
 export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
-  manifest: () => {
-    const isDev = process.env.NODE_ENV !== 'production' || process.env.WXT_MODE === 'dev';
-    const manifest = defineLinguaLensManifest(isDev);
+  manifest: ({ mode }) => {
+    const isDev = mode === 'development' || process.env.WXT_MODE === 'dev';
+    const env = loadEnv(mode, process.cwd(), ['VITE_', 'WXT_']);
+    const manifest = defineLinguaLensManifest(isDev, env.VITE_CSP_CONNECT_ORIGINS);
     return {
       ...manifest,
       options_ui: {

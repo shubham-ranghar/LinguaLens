@@ -1,4 +1,5 @@
 import type { UserSettings } from '@/types';
+import { FREELLM_BASE_URL } from '@/lib/config';
 
 export const DEFAULT_SETTINGS: UserSettings = {
   targetLanguage: 'en',
@@ -9,7 +10,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   geminiApiKey: '',
   maxHistoryItems: 100,
   hinglishTranslationMode: 'auto',
-  freeLLMBaseUrl: 'https://lingualens-proxy.onrender.com',
+  freeLLMBaseUrl: FREELLM_BASE_URL,
 };
 
 export const STORAGE_KEYS = {

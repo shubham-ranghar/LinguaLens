@@ -5,10 +5,16 @@
  * We use https/http matches (not <all_urls>) and declare host_permissions for HTTP(S).
  * For stricter privacy, users can later switch to optional_host_permissions + opt-in.
  */
-export function defineLinguaLensManifest(isDev = false) {
+export function defineLinguaLensManifest(
+  isDev = false,
+  cspConnectOrigins: string,
+) {
   const localhostEntries = isDev ? ' http://localhost:* http://127.0.0.1:*' : '';
   const localhostHostPermissions = isDev ? ['http://localhost:*/*', 'http://127.0.0.1:*/*'] : [];
-  
+  if (!cspConnectOrigins.trim()) {
+    throw new Error('VITE_CSP_CONNECT_ORIGINS is required. Copy .env.example to .env.');
+  }
+
   return {
     name: 'LinguaLens',
     description:
@@ -42,7 +48,7 @@ export function defineLinguaLensManifest(isDev = false) {
       },
     },
     content_security_policy: {
-      extension_pages: `script-src 'self'; object-src 'self'; connect-src 'self' https://api.mymemory.translated.net https://generativelanguage.googleapis.com${localhostEntries} https://freellmapi-0lx8.onrender.com https://lingualens-proxy.onrender.com`,
+      extension_pages: `script-src 'self'; object-src 'self'; connect-src 'self' ${cspConnectOrigins.trim()}${localhostEntries}`,
     },
   };
 }

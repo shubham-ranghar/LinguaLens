@@ -81,6 +81,7 @@ API keys and MyMemory email stay in `chrome.storage.local` (not synced). Non-sen
 ### Install & run
 
 ```bash
+cp .env.example .env   # then fill in secrets / URLs
 npm install
 npm run dev          # Chrome
 npm run dev:firefox  # Firefox
@@ -127,7 +128,7 @@ Open **Options** (right-click the extension icon → Options):
 | FreeLLM base URL | Defaults to the LinguaLens proxy |
 | Gemini API key | Best-quality Hinglish (stored locally) |
 
-Never commit API keys. Prefer user-supplied keys or a server-side proxy.
+Never commit API keys or `.env`. Prefer user-supplied keys (Gemini) or a server-side proxy. Copy `.env.example` → `.env` for build-time URLs and the FreeLLM extension secret.
 
 ## Keyboard shortcut
 

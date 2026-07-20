@@ -4,6 +4,7 @@ import { t } from '@/lib/i18n';
 import { fetchSettings, updateSettings } from '@/lib/messaging';
 import { SUPPORTED_LANGUAGES } from '@/lib/utils';
 import { logger } from '@/lib/logger';
+import { FREELLM_BASE_URL } from '@/lib/config';
 import type { PopupBehavior, Theme, UserSettings } from '@/types';
 
 export function OptionsApp() {
@@ -260,7 +261,7 @@ export function OptionsApp() {
                 type="text"
                 value={settings.freeLLMBaseUrl || ''}
                 onChange={(e) => patch({ freeLLMBaseUrl: e.target.value })}
-                placeholder="https://lingualens-proxy.onrender.com"
+                placeholder={FREELLM_BASE_URL}
                 autoComplete="off"
                 className="ll-field ll-field--settings ll-focus-ring"
                 style={{ display: 'block', width: '100%', minHeight: '40px' }}

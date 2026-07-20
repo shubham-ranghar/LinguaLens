@@ -6,6 +6,7 @@ import { detectHinglish } from '@/lib/detection/hinglishDetector';
 import { translateHinglish } from '@/lib/api/ai-features';
 import { transliterateHinglishToDevanagari } from '@/lib/transliteration/hinglishToDevanagari';
 import { postProcessTranslation, checkTranslationQuality } from './translationPostProcessor';
+import { DICTIONARY_API_URL, MYMEMORY_API_URL } from '@/lib/config';
 
 // Configuration constants for language detection
 export const MIN_RELIABLE_DETECTION_LENGTH = 20;
@@ -995,8 +996,8 @@ export function detectLanguage(text: string): { language: string | null; method:
   return { language: null, method: 'franc-no-match', confidence: 0 };
 }
 
-const MYMEMORY_ENDPOINT = 'https://api.mymemory.translated.net/get';
-const DICTIONARY_ENDPOINT = 'https://api.dictionaryapi.dev/api/v2/entries/en';
+const MYMEMORY_ENDPOINT = MYMEMORY_API_URL;
+const DICTIONARY_ENDPOINT = DICTIONARY_API_URL;
 
 /**
  * Generic translation provider interface.

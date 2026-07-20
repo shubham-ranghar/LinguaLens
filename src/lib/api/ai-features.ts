@@ -1,5 +1,4 @@
-const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
+import { FREELLM_BASE_URL, FREELLM_EXTENSION_SECRET, GEMINI_API_URL } from '@/lib/config';
 import { logger } from '@/lib/logger';
 import { getSettings } from '@/lib/storage';
 import { addDebugLog } from '@/lib/debug';
@@ -43,8 +42,8 @@ interface OpenAIChatResponse {
 
 async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise<string> {
   const settings = await getSettings();
-  const baseUrl = settings.freeLLMBaseUrl?.trim() || 'https://lingualens-proxy.onrender.com';
-  const extensionSecret = 'BBF2938518B677F9780A02837C2CD5A6F74F03D2CFB8C28A721245CCE588E91A';
+  const baseUrl = settings.freeLLMBaseUrl?.trim() || FREELLM_BASE_URL;
+  const extensionSecret = FREELLM_EXTENSION_SECRET;
 
   logger.freellmApi('Base URL:', baseUrl);
 
@@ -138,8 +137,8 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
   const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for cold starts
 
   try {
-    const url = `${GEMINI_ENDPOINT}?key=${apiKey}`;
-    const maskedUrl = `${GEMINI_ENDPOINT}?key=${maskedKey}`;
+    const url = `${GEMINI_API_URL}?key=${apiKey}`;
+    const maskedUrl = `${GEMINI_API_URL}?key=${maskedKey}`;
     logger.geminiApi('Calling URL:', maskedUrl);
 
     const response = await fetch(url, {
