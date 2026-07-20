@@ -43,15 +43,9 @@ interface OpenAIChatResponse {
 
 async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise<string> {
   const settings = await getSettings();
-  const apiKey = settings.freeLLMApiKey?.trim();
-  const baseUrl = settings.freeLLMBaseUrl?.trim() || 'https://api.freellm.ai';
+  const baseUrl = settings.freeLLMBaseUrl?.trim() || 'https://lingualens-proxy.onrender.com';
+  const extensionSecret = 'BBF2938518B677F9780A02837C2CD5A6F74F03D2CFB8C28A721245CCE588E91A';
 
-  if (!apiKey) {
-    throw new Error('MISSING_API_KEY');
-  }
-
-  const maskedKey = `${apiKey.substring(0, 6)}...${apiKey.slice(-4)}`;
-  logger.freellmApi('Using API key:', maskedKey);
   logger.freellmApi('Base URL:', baseUrl);
 
   const controller = new AbortController();
@@ -72,7 +66,7 @@ async function callFreeLLMAPI(systemPrompt: string, userPrompt: string): Promise
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'X-Extension-Secret': extensionSecret,
       },
       body: JSON.stringify({
         model: 'auto',

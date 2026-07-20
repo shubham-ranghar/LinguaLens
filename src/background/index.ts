@@ -151,7 +151,6 @@ async function handleTranslate(
   if (DEBUG) console.log('handleTranslate called with text length:', payload.text.length);
   await addDebugLog('handleTranslate-called', { textLength: payload.text.length });
   const settings = await getSettings();
-  await addDebugLog('settings-loaded', { hasApiKey: !!settings.freeLLMApiKey });
   const requestedSource = payload.sourceLanguage ?? settings.sourceLanguage;
   const target = payload.targetLanguage || settings.targetLanguage;
   if (DEBUG) console.log('Requested target:', payload.targetLanguage, 'Settings target:', settings.targetLanguage, 'Final target used:', target);
@@ -168,18 +167,15 @@ async function handleTranslate(
       await addDebugLog('hinglish-detected', { 
         confidence: hinglishDetection.confidence,
         method: hinglishDetection.method,
-        hasApiKey: !!settings.freeLLMApiKey 
       });
       logger.info('background', { 
         action: 'hinglish-detected',
         confidence: hinglishDetection.confidence,
-        hasApiKey: !!settings.freeLLMApiKey 
       });
 
-      if (settings.freeLLMApiKey) {
-        try {
-          await addDebugLog('hinglish-routed-to-ai', { targetLanguage: target });
-          logger.info('background', { action: 'hinglish-routed-to-ai', targetLanguage: target });
+      try {
+        await addDebugLog('hinglish-routed-to-ai', { targetLanguage: target });
+        logger.info('background', { action: 'hinglish-routed-to-ai', targetLanguage: target });
           
           // Use Hinglish-aware prompt for AI translation
           const targetLanguageName = getLanguageName(target);
@@ -239,18 +235,6 @@ IMPORTANT INSTRUCTIONS:
           });
           // Fall through to normal translation path if AI fails
         }
-      } else {
-        // No API key for Hinglish translation
-        await addDebugLog('hinglish-no-api-key', { targetLanguage: target });
-        logger.warn('background', { action: 'hinglish-no-api-key' });
-        return { 
-          type: 'ERROR', 
-          payload: { 
-            code: 'MISSING_API_KEY', 
-            message: 'Hinglish translation requires an API key. Please add your FreeLLMAPI key in Settings to translate Hinglish text.' 
-          } 
-        };
-      }
     }
   }
 
@@ -292,23 +276,21 @@ IMPORTANT INSTRUCTIONS:
         settings,
       );
     } catch (primaryError) {
-      // MyMemory failed - attempt AI fallback if API key is available
+      // MyMemory failed - attempt AI fallback
       await addDebugLog('primary-provider-failed', { 
         error: primaryError instanceof Error ? primaryError.message : String(primaryError),
-        hasApiKey: !!settings.freeLLMApiKey 
       });
       logger.warn('background', { 
         action: 'primary-provider-failed',
         error: primaryError instanceof Error ? primaryError.message : String(primaryError),
       });
 
-      if (settings.freeLLMApiKey) {
-        try {
-          await addDebugLog('ai-fallback-attempted', { 
-            targetLanguage: target,
-            reason: 'primary-provider-error'
-          });
-          logger.info('background', { action: 'attempting-ai-fallback', reason: 'primary-provider-error' });
+      try {
+        await addDebugLog('ai-fallback-attempted', { 
+          targetLanguage: target,
+          reason: 'primary-provider-error'
+        });
+        logger.info('background', { action: 'attempting-ai-fallback', reason: 'primary-provider-error' });
           const aiTranslation = await translateWithAI(payload.text, target);
           result = {
             translatedText: aiTranslation,
@@ -338,11 +320,6 @@ IMPORTANT INSTRUCTIONS:
           });
           throw primaryError; // Throw original error to show proper error to user
         }
-      } else {
-        // No API key available - throw the original error
-        await addDebugLog('ai-fallback-skipped', { reason: 'no-api-key' });
-        throw primaryError;
-      }
     }
 
     // Check for silent failure (translation returns same/near-identical text)
@@ -361,9 +338,8 @@ IMPORTANT INSTRUCTIONS:
         translatedText: result.translatedText.substring(0, 100),
       });
       
-      // Attempt AI fallback if user has FreeLLMAPI key configured and not already using AI
-      if (settings.freeLLMApiKey && translationMethod !== 'ai-fallback') {
-        await addDebugLog('ai-fallback-check', { hasApiKey: !!settings.freeLLMApiKey });
+      // Attempt AI fallback if not already using AI
+      if (translationMethod !== 'ai-fallback') {
         try {
           await addDebugLog('ai-fallback-attempted', { targetLanguage: target });
           logger.info('background', { action: 'attempting-ai-fallback', reason: 'silent-failure' });
@@ -385,12 +361,12 @@ IMPORTANT INSTRUCTIONS:
           });
         }
       } else {
-        await addDebugLog('ai-fallback-skipped', { reason: translationMethod === 'ai-fallback' ? 'already-using-ai' : 'no-api-key' });
+        await addDebugLog('ai-fallback-skipped', { reason: 'already-using-ai' });
       }
     }
 
     // Apply AI polish if enabled (only if not already using AI fallback)
-    if (settings.aiEnhancedTranslation && settings.freeLLMApiKey && translationMethod !== 'ai-fallback') {
+    if (settings.aiEnhancedTranslation && translationMethod !== 'ai-fallback') {
       try {
         const polishedText = await polishTranslation(result.translatedText, target);
         result = { ...result, translatedText: polishedText };
@@ -455,12 +431,6 @@ IMPORTANT INSTRUCTIONS:
 
 function handleAiError(error: unknown): BackgroundResponse {
   if (error instanceof Error) {
-    if (error.message === 'MISSING_API_KEY') {
-      return {
-        type: 'ERROR',
-        payload: { code: 'MISSING_API_KEY', message: 'Add your FreeLLMAPI key in Settings.' },
-      };
-    }
     if (error.message === 'INVALID_API_KEY') {
       return {
         type: 'ERROR',
@@ -526,11 +496,6 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
     }
 
     case 'AI_SIMPLIFY': {
-      const settings = await getSettings();
-      const maskedKey = settings.freeLLMApiKey 
-        ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
-        : 'MISSING';
-      logger.debug('ai-simplify', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
       await addDebugLog('ai-simplify-handler-started', { textLength: message.payload.text.length });
       try {
         const result = await simplify(message.payload.text);
@@ -543,11 +508,6 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
     }
 
     case 'AI_CORRECT_GRAMMAR': {
-      const settings = await getSettings();
-      const maskedKey = settings.freeLLMApiKey 
-        ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
-        : 'MISSING';
-      logger.debug('ai-correct-grammar', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
       await addDebugLog('ai-correct-grammar-handler-started', { textLength: message.payload.text.length });
       try {
         const result = await correctGrammar(message.payload.text);
@@ -560,11 +520,6 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
     }
 
     case 'AI_SUMMARIZE': {
-      const settings = await getSettings();
-      const maskedKey = settings.freeLLMApiKey 
-        ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
-        : 'MISSING';
-      logger.debug('ai-summarize', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
       await addDebugLog('ai-summarize-handler-started', { textLength: message.payload.text.length });
       try {
         const result = await summarize(message.payload.text);
@@ -577,11 +532,6 @@ async function handleMessage(message: BackgroundRequest): Promise<BackgroundResp
     }
 
     case 'AI_REWRITE': {
-      const settings = await getSettings();
-      const maskedKey = settings.freeLLMApiKey 
-        ? `${settings.freeLLMApiKey.substring(0, 6)}...${settings.freeLLMApiKey.slice(-4)}`
-        : 'MISSING';
-      logger.debug('ai-rewrite', { settings: { ...settings, freeLLMApiKey: maskedKey }, apiKeyLength: settings.freeLLMApiKey?.length ?? 0 });
       await addDebugLog('ai-rewrite-handler-started', { textLength: message.payload.text.length, tone: message.payload.tone });
       try {
         const result = await rewrite(message.payload.text, message.payload.tone);

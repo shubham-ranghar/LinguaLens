@@ -56,15 +56,7 @@ export function OptionsApp() {
     if (!settings) return;
     setError(null);
     try {
-      console.log('[Options] Saving settings:', { 
-        hasFreeLLMKey: !!settings.freeLLMApiKey, 
-        keyPreview: settings.freeLLMApiKey?.substring(0, 6) + '...' 
-      });
       const res = await updateSettings(settings);
-      console.log('[Options] Save successful, response:', { 
-        hasFreeLLMKey: !!res.payload.freeLLMApiKey,
-        keyPreview: res.payload.freeLLMApiKey?.substring(0, 6) + '...'
-      });
       setSettings(res.payload);
       setSaved(true);
       setHasChanges(false);
@@ -260,33 +252,18 @@ export function OptionsApp() {
           </p>
           <div className="ll-settings-field-group">
             <div className="ll-settings-field">
-              <label className="ll-settings-field__label">FreeLLMAPI Key</label>
-              <input
-                type="text"
-                value={settings.freeLLMApiKey || ''}
-                onChange={(e) => patch({ freeLLMApiKey: e.target.value })}
-                placeholder="Enter your FreeLLMAPI key"
-                autoComplete="off"
-                className="ll-field ll-field--settings ll-focus-ring"
-                style={{ display: 'block', width: '100%', minHeight: '40px' }}
-              />
-              <span className="ll-settings-field__caption">
-                Your API key is stored locally on your device and never shared.
-              </span>
-            </div>
-            <div className="ll-settings-field">
               <label className="ll-settings-field__label">FreeLLMAPI Base URL (optional)</label>
               <input
                 type="text"
                 value={settings.freeLLMBaseUrl || ''}
                 onChange={(e) => patch({ freeLLMBaseUrl: e.target.value })}
-                placeholder="https://api.freellm.ai"
+                placeholder="https://lingualens-proxy.onrender.com"
                 autoComplete="off"
                 className="ll-field ll-field--settings ll-focus-ring"
                 style={{ display: 'block', width: '100%', minHeight: '40px' }}
               />
               <span className="ll-settings-field__caption">
-                Leave empty to use the default FreeLLMAPI endpoint.
+                Leave empty to use the default proxy endpoint.
               </span>
             </div>
           </div>

@@ -55,12 +55,6 @@ export async function saveSettings(partial: Partial<UserSettings>): Promise<User
     await setLocal(STORAGE_KEYS.freeLLMApiKey, freeLLMApiKey);
     await setLocal(STORAGE_KEYS.freeLLMBaseUrl, freeLLMBaseUrl);
     
-    // Verify the save worked by reading back
-    const verifyFreeLLMKey = await getLocal<string>(STORAGE_KEYS.freeLLMApiKey);
-    if (freeLLMApiKey && verifyFreeLLMKey !== freeLLMApiKey) {
-      throw new Error(`FreeLLM API key verification failed: expected "${freeLLMApiKey.substring(0, 6)}..." but got "${verifyFreeLLMKey?.substring(0, 6)}..."`);
-    }
-    
     return merged;
   } catch (error) {
     console.error('[Storage] saveSettings failed:', error);

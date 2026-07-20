@@ -41,7 +41,7 @@ export function defineLinguaLensManifest(isDev = false) {
       },
     },
     content_security_policy: {
-      extension_pages: `script-src 'self'; object-src 'self'; connect-src 'self' https://api.mymemory.translated.net https://generativelanguage.googleapis.com${localhostEntries} https://freellmapi-0lx8.onrender.com`,
+      extension_pages: `script-src 'self'; object-src 'self'; connect-src 'self' https://api.mymemory.translated.net https://generativelanguage.googleapis.com${localhostEntries} https://freellmapi-0lx8.onrender.com https://lingualens-proxy.onrender.com`,
     },
   };
 }
