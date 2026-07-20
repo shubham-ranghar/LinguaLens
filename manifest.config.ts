@@ -7,6 +7,7 @@
  */
 export function defineLinguaLensManifest(isDev = false) {
   const localhostEntries = isDev ? ' http://localhost:* http://127.0.0.1:*' : '';
+  const localhostHostPermissions = isDev ? ['http://localhost:*/*', 'http://127.0.0.1:*/*'] : [];
   
   return {
     name: 'LinguaLens',
@@ -14,7 +15,7 @@ export function defineLinguaLensManifest(isDev = false) {
       'Select text on any page for instant translation, pronunciation, and language learning.',
     version: '1.0.0',
     permissions: ['storage', 'activeTab', 'scripting'],
-    host_permissions: ['https://*/*', 'http://*/*', 'http://localhost:*/*', 'http://127.0.0.1:*/*'],
+    host_permissions: ['https://*/*', 'http://*/*', ...localhostHostPermissions],
     action: {
       default_title: 'LinguaLens',
       default_popup: 'popup.html',
